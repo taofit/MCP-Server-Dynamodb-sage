@@ -2,11 +2,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -23,8 +26,32 @@ type DescribeTableArgs struct {
 }
 
 type ScanTableArgs struct {
-	TableName string `json:"tableName"`
+	TableName                 string         `json:"tableName"`
+	ExpressionAttributeValues map[string]any `json:"expressionAttributeValues"`
+	FilterExpression          string         `json:"filterExpression"`
+	ProjectionExpression      string         `json:"projectionExpression"`
+	Limit                     int32          `json:"limit"`
+	ExclusiveStartKey         map[string]any `json:"exclusiveStartKey"`
 }
+
+type PutItemArgs struct {
+	TableName string         `json:"tableName"`
+	Item      map[string]any `json:"item"`
+}
+
+type QueryTableArgs struct {
+	TableName                 string         `json:"tableName"`
+	KeyConditionExpression    string         `json:"keyConditionExpression"`
+	ExpressionAttributeValues map[string]any `json:"expressionAttributeValues"`
+	Limit                     int32          `json:"limit"`
+	ExclusiveStartKey         map[string]any `json:"exclusiveStartKey"`
+}
+
+type BatchPutItemsArgs struct {
+	TableName string           `json:"tableName"`
+	Items     []map[string]any `json:"items"`
+}
+const batchSize = 25
 
 func New(db *dynamodb.Client) *Server {
 
@@ -37,7 +64,7 @@ func New(db *dynamodb.Client) *Server {
 		db: db,
 		s:  s,
 	}
-	addTools(s, srv)
+	srv.addTools()
 
 	return srv
 }
@@ -64,8 +91,8 @@ func (srv *Server) SSEHandler() http.Handler {
 	})
 }
 
-func addTools(s *mcp.Server, srv *Server) {
-	mcp.AddTool(s, &mcp.Tool{
+func (srv *Server) addTools() {
+	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "list_tables",
 		Description: "List all DynamoDB tables",
 		InputSchema: map[string]any{
@@ -73,7 +100,7 @@ func addTools(s *mcp.Server, srv *Server) {
 		},
 	}, srv.listTables)
 
-	mcp.AddTool(s, &mcp.Tool{
+	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "describe_table",
 		Description: "Get details about a DynamoDB table schema, indexes, and status",
 		InputSchema: map[string]any{
@@ -88,7 +115,7 @@ func addTools(s *mcp.Server, srv *Server) {
 		},
 	}, srv.describeTable)
 
-	mcp.AddTool(s, &mcp.Tool{
+	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "scan_table",
 		Description: "Read items from a DynamoDB table (returns up to 20 items)",
 		InputSchema: map[string]any{
@@ -98,10 +125,241 @@ func addTools(s *mcp.Server, srv *Server) {
 					"type":        "string",
 					"description": "The name of the table to scan",
 				},
+				"filterExpression": map[string]any{
+					"type":        "string",
+					"description": "The filter expression for the scan",
+				},
+				"projectionExpression": map[string]any{
+					"type":        "string",
+					"description": "The projection expression for the scan",
+				},
+				"expressionAttributeValues": map[string]any{
+					"type":        "object",
+					"description": "The expression attribute values for the scan",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "The maximum number of items to return",
+				},
+				"exclusiveStartKey": map[string]any{
+					"type":        "object",
+					"description": "The exclusive start key for the scan",
+				},
 			},
 			"required": []string{"tableName"},
 		},
 	}, srv.scanTable)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "put_item",
+		Description: "Put an item into a DynamoDB table",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to put an item into",
+				},
+				"item": map[string]any{
+					"type":        "object",
+					"description": "The item to put into the table, in JSON format",
+				},
+			},
+			"required": []string{"tableName", "item"},
+		},
+	}, srv.putItem)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "query_table",
+		Description: "Query a table using a key condition expression and optional filter expression (returns up to 20 items each time)",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to query",
+				},
+				"keyConditionExpression": map[string]any{
+					"type":        "string",
+					"description": "The condition expression for the query",
+				},
+				"expressionAttributeValues": map[string]any{
+					"type":        "object",
+					"description": "The expression attribute values for the query",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "The maximum number of items to return",
+				},
+				"exclusiveStartKey": map[string]any{
+					"type":        "object",
+					"description": "The exclusive start key for the query(pagination parameter)",
+				},
+			},
+			"required": []string{"tableName", "keyConditionExpression", "expressionAttributeValues"},
+		},
+	}, srv.queryTable)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "batch_put_items",
+		Description: "Put multiple items into a DynamoDB table",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table where new items go",
+				},
+				"items": map[string]any{
+					"type":        "array",
+					"description": "The items put into the table in JSON format",
+					"items": map[string]any{
+						"type": "object",
+					},
+				},
+			},
+			"required": []string{"tableName", "items"},
+		},
+	}, srv.batchPutItems)
+}
+
+func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, args *QueryTableArgs) (*mcp.CallToolResult, any, error) {
+	var startKey map[string]types.AttributeValue
+	if args.ExclusiveStartKey != nil {
+		var err error
+		startKey, err = attributevalue.MarshalMap(args.ExclusiveStartKey)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("Error when marshaling exclusive start key: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+	}
+
+	attributevalues, err := attributevalue.MarshalMap(args.ExpressionAttributeValues)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when marshaling expression attribute values: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	if args.KeyConditionExpression == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: "KeyConditionExpression is required",
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	var limit int32 = 20
+	if args.Limit > 0 {
+		limit = args.Limit
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	result, err := srv.db.Query(ctx, &dynamodb.QueryInput{
+		TableName:                 &args.TableName,
+		KeyConditionExpression:    &args.KeyConditionExpression,
+		ExpressionAttributeValues: attributevalues,
+		Limit:                     &limit,
+		ExclusiveStartKey:         startKey,
+	})
+
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when querying table: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	items := []map[string]any{}
+	err = attributevalue.UnmarshalListOfMaps(result.Items, &items)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when unmarshaling items: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	itemsText := fmt.Sprintf("Queried %d items from table %s:", len(items), args.TableName)
+	for i, item := range items {
+		itemsText += fmt.Sprintf("\n[%d] %+v", i+1, item)
+	}
+
+	if len(result.LastEvaluatedKey) > 0 {
+		nextKey := map[string]any{}
+		err = attributevalue.UnmarshalMap(result.LastEvaluatedKey, &nextKey)
+		jsonKey, _ := json.Marshal(nextKey)
+		if err == nil {
+			itemsText += fmt.Sprintf("\n\nNote: There are more items available. Use the 'exclusiveStartKey' option with value: %s to fetch the next page of items.\n", string(jsonKey))
+		} else {
+			itemsText += fmt.Sprintf("\n\nNote: There are more items available, but failed to unmarshal the next key: %v\n", err)
+		}
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: itemsText,
+			},
+		},
+	}, nil, nil
+}
+
+func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *PutItemArgs) (*mcp.CallToolResult, any, error) {
+	// Convert the plain Go map into a map of DynamoDB AttributeValues
+	av, err := attributevalue.MarshalMap(args.Item)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error marshaling item: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	_, err = srv.db.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: &args.TableName,
+		Item:      av,
+	})
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when putting item: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: fmt.Sprintf("Successfully put item into table %s", args.TableName),
+			},
+		},
+	}, nil, nil
 }
 
 func (srv *Server) listTables(ctx context.Context, req *mcp.CallToolRequest, args *ListTablesArgs) (*mcp.CallToolResult, any, error) {
@@ -144,10 +402,24 @@ func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, 
 			IsError: true,
 		}, nil, nil
 	}
+	var tableName = "Unknown"
+	if out.Table.TableName != nil {
+		tableName = *out.Table.TableName
+	}
+
+	var itemCount int64 = 0
+	if out.Table.ItemCount != nil {
+		itemCount = *out.Table.ItemCount
+	}
+
+	var sizeBytes int64 = 0
+	if out.Table.TableSizeBytes != nil {
+		sizeBytes = *out.Table.TableSizeBytes
+	}
 
 	// Format the output in a readable way
 	details := fmt.Sprintf("Table: %s\nStatus: %s\nItem Count: %d\nSize (Bytes): %d\n",
-		*out.Table.TableName, out.Table.TableStatus, out.Table.ItemCount, out.Table.TableSizeBytes)
+		tableName, out.Table.TableStatus, itemCount, sizeBytes)
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
@@ -159,12 +431,63 @@ func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, 
 }
 
 func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args *ScanTableArgs) (*mcp.CallToolResult, any, error) {
-	// Limit scan to 20 items to avoid token overflow in the AI client
-	limit := int32(20)
-	out, err := srv.db.Scan(ctx, &dynamodb.ScanInput{
+	var limit int32 = 20
+	if args.Limit > 0 {
+		limit = args.Limit
+	}
+	if args.Limit > 100 {
+		limit = 100
+	}
+	input := &dynamodb.ScanInput{
 		TableName: &args.TableName,
 		Limit:     &limit,
-	})
+	}
+	if args.ProjectionExpression != "" {
+		input.ProjectionExpression = &args.ProjectionExpression
+	}
+	if args.FilterExpression != "" {
+		input.FilterExpression = &args.FilterExpression
+	}
+	if args.ExpressionAttributeValues != nil {
+		var err error
+		input.ExpressionAttributeValues, err = attributevalue.MarshalMap(args.ExpressionAttributeValues)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("Error when marshaling expression attribute values: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+	}
+	if args.ExclusiveStartKey != nil {
+		startKey, err := attributevalue.MarshalMap(args.ExclusiveStartKey)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("Error when marshaling exclusive start key: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+		input.ExclusiveStartKey = startKey
+	}
+	out, err := srv.db.Scan(ctx, input)
+
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when scanning table %s: %v", args.TableName, err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
 	if err != nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -176,16 +499,107 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 		}, nil, nil
 	}
 
+	// Unmarshal the DynamoDB items into a list of plain Go maps
+	items := []map[string]any{}
+	err = attributevalue.UnmarshalListOfMaps(out.Items, &items)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error unmarshaling items: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
 	// For a simple text representation of the items
-	itemsText := fmt.Sprintf("Scanned %d items from table %s:\n", len(out.Items), args.TableName)
-	for i, item := range out.Items {
-		itemsText += fmt.Sprintf("[%d] %v\n", i+1, item)
+	itemsText := fmt.Sprintf("Scanned %d items from table %s:", len(items), args.TableName)
+	for i, item := range items {
+		itemsText += fmt.Sprintf("\n[%d] %+v", i+1, item)
+	}
+	// Check if there are more items available
+	if len(out.LastEvaluatedKey) > 0 {
+		nextKey := map[string]any{}
+		err = attributevalue.UnmarshalMap(out.LastEvaluatedKey, &nextKey)
+		jsonKey, _ := json.Marshal(nextKey)
+		if err == nil {
+			itemsText += fmt.Sprintf("\n\nNote: There are more items available. Use the 'exclusiveStartKey' option with value: %s to fetch the next page of items.", string(jsonKey))
+		} else {
+			itemsText += fmt.Sprintf("\n\nNote: There are more items available, but failed to unmarshal the next key: %v", err)
+		}
 	}
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
 				Text: itemsText,
+			},
+		},
+	}, nil, nil
+}
+
+func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchPutItemsArgs) (*mcp.CallToolResult, any, error) {
+	if len(args.Items) == 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("No items to put into table %s", args.TableName),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	
+	items := []types.WriteRequest{}
+	for _, item := range args.Items {
+		av, err := attributevalue.MarshalMap(item)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("Error when marshalling item %v: %v", item, err),
+					},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+		writeRequest := types.WriteRequest{
+			PutRequest: &types.PutRequest{
+				Item: av,
+			},
+		}
+		items = append(items, writeRequest)
+	}
+
+	for start := 0; start < len(items); start += batchSize {
+		end := start + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		input := &dynamodb.BatchWriteItemInput{
+				RequestItems: map[string][]types.WriteRequest{
+				args.TableName: items[start:end],
+			},
+		}
+
+		_, err := srv.db.BatchWriteItem(ctx, input)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("Error when batch putting items to table %s : %v", args.TableName, err),
+					},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+	} 
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: fmt.Sprintf("Successfully put %d items into table %s", len(args.Items), args.TableName),
 			},
 		},
 	}, nil, nil
