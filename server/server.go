@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"dynamodb-sage/internal/engine"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,8 +15,9 @@ import (
 )
 
 type Server struct {
-	db *dynamodb.Client
-	s  *mcp.Server
+	db        *dynamodb.Client
+	s         *mcp.Server
+	guardrail *engine.Guardrail
 }
 
 type ListTablesArgs struct {
@@ -51,6 +53,12 @@ type BatchPutItemsArgs struct {
 	TableName string           `json:"tableName"`
 	Items     []map[string]any `json:"items"`
 }
+
+type DeleteItemArgs struct {
+	TableName string         `json:"tableName"`
+	Key       map[string]any `json:"key"`
+}
+
 const batchSize = 25
 
 func New(db *dynamodb.Client) *Server {
@@ -60,9 +68,11 @@ func New(db *dynamodb.Client) *Server {
 		Version: "1.0.0",
 	}, nil)
 
+	guardrail := engine.NewGuardrail(100, 20)
 	srv := &Server{
-		db: db,
-		s:  s,
+		db:        db,
+		s:         s,
+		guardrail: guardrail,
 	}
 	srv.addTools()
 
@@ -221,6 +231,25 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName", "items"},
 		},
 	}, srv.batchPutItems)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "delete_item",
+		Description: "Delete an item from a DynamoDB table",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to delete an item from",
+				},
+				"key": map[string]any{
+					"type":        "object",
+					"description": "The primary key of the item to delete in JSON format",
+				},
+			},
+			"required": []string{"tableName", "key"},
+		},
+	}, srv.deleteItem)
 }
 
 func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, args *QueryTableArgs) (*mcp.CallToolResult, any, error) {
@@ -262,13 +291,7 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 			IsError: true,
 		}, nil, nil
 	}
-	var limit int32 = 20
-	if args.Limit > 0 {
-		limit = args.Limit
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	limit, warning := srv.guardrail.EnforceLimit(args.Limit)
 
 	result, err := srv.db.Query(ctx, &dynamodb.QueryInput{
 		TableName:                 &args.TableName,
@@ -300,9 +323,11 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 			IsError: true,
 		}, nil, nil
 	}
-	itemsText := fmt.Sprintf("Queried %d items from table %s:", len(items), args.TableName)
-	for i, item := range items {
-		itemsText += fmt.Sprintf("\n[%d] %+v", i+1, item)
+	itemsText := fmt.Sprintf("DynamoDB Table: \"%s\"\nQueried %d items from table %s:", args.TableName, len(items), args.TableName)
+	scrubbedItems := srv.guardrail.ScrubItems(items)
+	for i, item := range scrubbedItems {
+		itemJson, _ := json.Marshal(item)
+		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJson))
 	}
 
 	if len(result.LastEvaluatedKey) > 0 {
@@ -314,6 +339,10 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 		} else {
 			itemsText += fmt.Sprintf("\n\nNote: There are more items available, but failed to unmarshal the next key: %v\n", err)
 		}
+	}
+
+	if warning != "" {
+		itemsText += "\nNote: " + warning
 	}
 
 	return &mcp.CallToolResult{
@@ -431,13 +460,7 @@ func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, 
 }
 
 func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args *ScanTableArgs) (*mcp.CallToolResult, any, error) {
-	var limit int32 = 20
-	if args.Limit > 0 {
-		limit = args.Limit
-	}
-	if args.Limit > 100 {
-		limit = 100
-	}
+	limit, warning := srv.guardrail.EnforceLimit(args.Limit)
 	input := &dynamodb.ScanInput{
 		TableName: &args.TableName,
 		Limit:     &limit,
@@ -514,9 +537,11 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 	}
 
 	// For a simple text representation of the items
-	itemsText := fmt.Sprintf("Scanned %d items from table %s:", len(items), args.TableName)
-	for i, item := range items {
-		itemsText += fmt.Sprintf("\n[%d] %+v", i+1, item)
+	itemsText := fmt.Sprintf("DynamoDB Table: \"%s\"\nScanned %d items from table %s:", args.TableName, len(items), args.TableName)
+	scrubbedItems := srv.guardrail.ScrubItems(items)
+	for i, item := range scrubbedItems {
+		itemJson, _ := json.Marshal(item)
+		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJson))
 	}
 	// Check if there are more items available
 	if len(out.LastEvaluatedKey) > 0 {
@@ -528,6 +553,9 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 		} else {
 			itemsText += fmt.Sprintf("\n\nNote: There are more items available, but failed to unmarshal the next key: %v", err)
 		}
+	}
+	if warning != "" {
+		itemsText += "\nNote: " + warning
 	}
 
 	return &mcp.CallToolResult{
@@ -550,7 +578,7 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 			IsError: true,
 		}, nil, nil
 	}
-	
+
 	items := []types.WriteRequest{}
 	for _, item := range args.Items {
 		av, err := attributevalue.MarshalMap(item)
@@ -578,7 +606,7 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 			end = len(items)
 		}
 		input := &dynamodb.BatchWriteItemInput{
-				RequestItems: map[string][]types.WriteRequest{
+			RequestItems: map[string][]types.WriteRequest{
 				args.TableName: items[start:end],
 			},
 		}
@@ -594,12 +622,91 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 				IsError: true,
 			}, nil, nil
 		}
-	} 
+	}
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
 				Text: fmt.Sprintf("Successfully put %d items into table %s", len(args.Items), args.TableName),
+			},
+		},
+	}, nil, nil
+}
+
+func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, args *DeleteItemArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateDelete(args.TableName); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Validation error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	if len(args.Key) == 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Key is required for deleting an item from table %s", args.TableName),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	av, err := attributevalue.MarshalMap(args.Key)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error: Failed to marshal key %v for table %s: %v", args.Key, args.TableName, err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	input := &dynamodb.DeleteItemInput{
+		TableName:    &args.TableName,
+		Key:          av,
+		ReturnValues: types.ReturnValueAllOld,
+	}
+
+	output, err := srv.db.DeleteItem(ctx, input)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when deleting item %v from table %s: %v", args.Key, args.TableName, err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	if len(output.Attributes) == 0 {
+		keyJson, _ := json.Marshal(args.Key)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Item with key %s not found in table %s", string(keyJson), args.TableName),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	attributes := map[string]any{}
+	attributevalue.UnmarshalMap(output.Attributes, &attributes)
+
+	scrubbed := srv.guardrail.ScrubItems([]map[string]any{attributes})
+	itemJson, _ := json.Marshal(scrubbed[0])
+	keyJson, _ := json.Marshal(args.Key)
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJson), args.TableName, string(itemJson)),
 			},
 		},
 	}, nil, nil
