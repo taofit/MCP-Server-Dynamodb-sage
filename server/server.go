@@ -59,6 +59,11 @@ type DeleteItemArgs struct {
 	Key       map[string]any `json:"key"`
 }
 
+type GetItemArgs struct {
+	TableName string         `json:"tableName"`
+	Key       map[string]any `json:"key"`
+}
+
 const batchSize = 25
 
 func New(db *dynamodb.Client) *Server {
@@ -250,6 +255,25 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName", "key"},
 		},
 	}, srv.deleteItem)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "get_item",
+		Description: "Get an item from the table using primary key",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to get an item from",
+				},
+				"key": map[string]any{
+					"type":        "object",
+					"description": "The primay key of the item to get in JSON format",
+				},
+			},
+			"required": []string{"tableName", "key"},
+		},
+	}, srv.getItem)
 }
 
 func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, args *QueryTableArgs) (*mcp.CallToolResult, any, error) {
@@ -707,6 +731,73 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		Content: []mcp.Content{
 			&mcp.TextContent{
 				Text: fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJson), args.TableName, string(itemJson)),
+			},
+		},
+	}, nil, nil
+}
+
+func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *GetItemArgs) (*mcp.CallToolResult, any, error) {
+	if args.Key == nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when getting item for key %v from table %s: Key is required", args.Key, args.TableName),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	av, err := attributevalue.MarshalMap(args.Key)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when marshalling key %v for table %s: %v", args.Key, args.TableName, err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	input := &dynamodb.GetItemInput{
+		TableName: &args.TableName,
+		Key:       av,
+	}
+
+	output, err := srv.db.GetItem(ctx, input)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when getting item from table %s: %v", args.TableName, err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	item := map[string]any{}
+	attributevalue.UnmarshalMap(output.Item, &item)
+	keyJson, _ := json.Marshal(args.Key)
+
+	if len(item) == 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Item with key %s not found in table %s", string(keyJson), args.TableName),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	
+	scrubbedItem := srv.guardrail.ScrubItems([]map[string]any{item})[0]
+	itemJson, _ := json.Marshal(scrubbedItem)
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: fmt.Sprintf("Item with key %s from table %s: %s", string(keyJson), args.TableName, string(itemJson)),
 			},
 		},
 	}, nil, nil
