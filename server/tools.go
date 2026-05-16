@@ -1,0 +1,243 @@
+package server
+
+import (
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+func (srv *Server) addTools() {
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "list_tables",
+		Description: "List all DynamoDB tables",
+		InputSchema: map[string]any{
+			"type": "object",
+		},
+	}, srv.listTables)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "describe_table",
+		Description: "Get details about a DynamoDB table schema, indexes, and status",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to describe",
+				},
+			},
+			"required": []string{"tableName"},
+		},
+	}, srv.describeTable)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "scan_table",
+		Description: "Read items from a DynamoDB table (returns up to 20 items)",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to scan",
+				},
+				"filterExpression": map[string]any{
+					"type":        "string",
+					"description": "The filter expression for the scan",
+				},
+				"projectionExpression": map[string]any{
+					"type":        "string",
+					"description": "The projection expression for the scan",
+				},
+				"expressionAttributeValues": map[string]any{
+					"type":        "object",
+					"description": "The expression attribute values for the scan",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "The maximum number of items to return",
+				},
+				"exclusiveStartKey": map[string]any{
+					"type":        "object",
+					"description": "The exclusive start key for the scan",
+				},
+			},
+			"required": []string{"tableName"},
+		},
+	}, srv.scanTable)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "put_item",
+		Description: "Put an item into a DynamoDB table",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to put an item into",
+				},
+				"item": map[string]any{
+					"type":        "object",
+					"description": "The item to put into the table, in JSON format",
+				},
+			},
+			"required": []string{"tableName", "item"},
+		},
+	}, srv.putItem)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "query_table",
+		Description: "Query a table using a key condition expression and optional filter expression (returns up to 20 items each time)",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to query",
+				},
+				"keyConditionExpression": map[string]any{
+					"type":        "string",
+					"description": "The condition expression for the query",
+				},
+				"expressionAttributeValues": map[string]any{
+					"type":        "object",
+					"description": "The expression attribute values for the query",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "The maximum number of items to return",
+				},
+				"exclusiveStartKey": map[string]any{
+					"type":        "object",
+					"description": "The exclusive start key for the query(pagination parameter)",
+				},
+			},
+			"required": []string{"tableName", "keyConditionExpression", "expressionAttributeValues"},
+		},
+	}, srv.queryTable)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "batch_put_items",
+		Description: "Put multiple items into a DynamoDB table",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table where new items go",
+				},
+				"items": map[string]any{
+					"type":        "array",
+					"description": "The items put into the table in JSON format",
+					"items": map[string]any{
+						"type": "object",
+					},
+				},
+			},
+			"required": []string{"tableName", "items"},
+		},
+	}, srv.batchPutItems)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "delete_item",
+		Description: "Delete an item from a DynamoDB table",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to delete an item from",
+				},
+				"key": map[string]any{
+					"type":        "object",
+					"description": "The primary key of the item to delete in JSON format",
+				},
+			},
+			"required": []string{"tableName", "key"},
+		},
+	}, srv.deleteItem)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "get_item",
+		Description: "Get an item from the table using primary key",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to get an item from",
+				},
+				"key": map[string]any{
+					"type":        "object",
+					"description": "The primay key of the item to get in JSON format",
+				},
+			},
+			"required": []string{"tableName", "key"},
+		},
+	}, srv.getItem)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "update_item",
+		Description: "Update an item in the table using primary key",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to update an item from",
+				},
+				"key": map[string]any{
+					"type":        "object",
+					"description": "The primary key of the item to update in JSON format",
+				},
+				"updateExpression": map[string]any{
+					"type":        "string",
+					"description": "the expression to update",
+				},
+				"expressionAttributeNames": map[string]any{
+					"type":        "object",
+					"description": "the expression attribute names for the update",
+				},
+				"expressionAttributeValues": map[string]any{
+					"type":        "object",
+					"description": "the expression attribute values for the update",
+				},
+				"conditionExpression": map[string]any{
+					"type":        "string",
+					"description": "A optional condition to evaluate before updating",
+				},
+				"returnValues": map[string]any{
+					"type":        "string",
+					"description": "the return values for the update",
+					"enum": []string{
+						"NONE",
+						"ALL_OLD",
+						"ALL_NEW",
+						"UPDATED_OLD",
+						"UPDATED_NEW",
+					},
+				},
+			},
+			"required": []string{"tableName", "key", "updateExpression"},
+		},
+	}, srv.updateItem)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "batch_get_item",
+		Description: "Batch get item from the table using primary key",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to batch get items from",
+				},
+				"keys": map[string]any{
+					"type":        "array",
+					"description": "The primary keys of the items to batch get in JSON format",
+					"items": map[string]any{
+						"type": "object",
+					},
+				},
+			},
+			"required": []string{"tableName", "keys"},
+		},
+	}, srv.batchGetItems)
+}
