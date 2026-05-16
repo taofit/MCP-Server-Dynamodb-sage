@@ -64,6 +64,21 @@ type GetItemArgs struct {
 	Key       map[string]any `json:"key"`
 }
 
+type UpdateItemArgs struct {
+	TableName                 string            `json:"tableName"`
+	Key                       map[string]any    `json:"key"`
+	UpdateExpression          string            `json:"updateExpression"`
+	ConditionExpression       string            `json:"conditionExpression"`
+	ReturnValue               string            `json:"returnValues"`
+	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames"`
+	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues"`
+}
+
+type BatchGetItemArgs struct {
+	TableName string           `json:"tableName"`
+	Keys      []map[string]any `json:"keys"`
+}
+
 const batchSize = 25
 
 func New(db *dynamodb.Client) *Server {
@@ -274,6 +289,74 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName", "key"},
 		},
 	}, srv.getItem)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "update_item",
+		Description: "Update an item in the table using primary key",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to update an item from",
+				},
+				"key": map[string]any{
+					"type":        "object",
+					"description": "The primary key of the item to update in JSON format",
+				},
+				"updateExpression": map[string]any{
+					"type":        "string",
+					"description": "the expression to update",
+				},
+				"expressionAttributeNames": map[string]any{
+					"type":        "object",
+					"description": "the expression attribute names for the update",
+				},
+				"expressionAttributeValues": map[string]any{
+					"type":        "object",
+					"description": "the expression attribute values for the update",
+				},
+				"conditionExpression": map[string]any{
+					"type":        "string",
+					"description": "A optional condition to evaluate before updating",
+				},
+				"returnValues": map[string]any{
+					"type":        "string",
+					"description": "the return values for the update",
+					"enum": []string{
+						"NONE",
+						"ALL_OLD",
+						"ALL_NEW",
+						"UPDATED_OLD",
+						"UPDATED_NEW",
+					},
+				},
+			},
+			"required": []string{"tableName", "key", "updateExpression"},
+		},
+	}, srv.updateItem)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "batch_get_item",
+		Description: "Batch get item from the table using primary key",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to batch get items from",
+				},
+				"keys": map[string]any{
+					"type":        "array",
+					"description": "The primary keys of the items to batch get in JSON format",
+					"items": map[string]any{
+						"type": "object",
+					},
+				},
+			},
+			"required": []string{"tableName", "keys"},
+		},
+	}, srv.batchGetItems)
 }
 
 func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, args *QueryTableArgs) (*mcp.CallToolResult, any, error) {
@@ -623,6 +706,8 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 		}
 		items = append(items, writeRequest)
 	}
+	unprocessedItemMsg := ""
+	totalUnprocessed := 0
 
 	for start := 0; start < len(items); start += batchSize {
 		end := start + batchSize
@@ -634,24 +719,40 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 				args.TableName: items[start:end],
 			},
 		}
-
-		_, err := srv.db.BatchWriteItem(ctx, input)
-		if err != nil {
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					&mcp.TextContent{
-						Text: fmt.Sprintf("Error when batch putting items to table %s : %v", args.TableName, err),
+		for i := 0; i < 3; i++ {
+			output, err := srv.db.BatchWriteItem(ctx, input)
+			if err != nil {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{
+							Text: fmt.Sprintf("Error when batch putting items to table %s: %v", args.TableName, err),
+						},
 					},
-				},
-				IsError: true,
-			}, nil, nil
+					IsError: true,
+				}, nil, nil
+			}
+			if len(output.UnprocessedItems) > 0 {
+				if i == 2 {
+					for _, reqs := range output.UnprocessedItems {
+						totalUnprocessed += len(reqs)
+					}
+				} else {
+					input.RequestItems = output.UnprocessedItems
+				}
+			} else {
+				break
+			}
 		}
+	}
+
+	if totalUnprocessed > 0 {
+		unprocessedItemMsg = fmt.Sprintf("\nWarning: %d items were not processed due to provisioned throughput exceeded when batch putting items to table %s.", totalUnprocessed, args.TableName)
 	}
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
-				Text: fmt.Sprintf("Successfully put %d items into table %s", len(args.Items), args.TableName),
+				Text: fmt.Sprintf("Successfully put %d items into table %s%s", len(args.Items)-totalUnprocessed, args.TableName, unprocessedItemMsg),
 			},
 		},
 	}, nil, nil
@@ -790,7 +891,7 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 			IsError: true,
 		}, nil, nil
 	}
-	
+
 	scrubbedItem := srv.guardrail.ScrubItems([]map[string]any{item})[0]
 	itemJson, _ := json.Marshal(scrubbedItem)
 
@@ -798,6 +899,218 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 		Content: []mcp.Content{
 			&mcp.TextContent{
 				Text: fmt.Sprintf("Item with key %s from table %s: %s", string(keyJson), args.TableName, string(itemJson)),
+			},
+		},
+	}, nil, nil
+}
+
+func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, args *UpdateItemArgs) (*mcp.CallToolResult, any, error) {
+	if args.Key == nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when updating item for table: %s key is required", args.TableName),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	key, err := attributevalue.MarshalMap(args.Key)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when marshalling key %v for table %s: %v", args.Key, args.TableName, err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	input := &dynamodb.UpdateItemInput{
+		TableName: &args.TableName,
+		Key:       key,
+	}
+
+	if len(args.ExpressionAttributeNames) > 0 {
+		input.ExpressionAttributeNames = args.ExpressionAttributeNames
+	}
+	if len(args.ExpressionAttributeValues) > 0 {
+		attriValue, err := attributevalue.MarshalMap(args.ExpressionAttributeValues)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("Error when marshalling expression attribute value %v for table %s: %v", args.ExpressionAttributeValues, args.TableName, err),
+					},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+		input.ExpressionAttributeValues = attriValue
+	}
+	if args.ConditionExpression != "" {
+		input.ConditionExpression = &args.ConditionExpression
+	}
+	if args.UpdateExpression != "" {
+		input.UpdateExpression = &args.UpdateExpression
+	}
+	if args.ReturnValue != "" {
+		input.ReturnValues = types.ReturnValue(args.ReturnValue)
+	}
+
+	output, err := srv.db.UpdateItem(ctx, input)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error when updating item %v from table %s: %v", args.Key, args.TableName, err),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+	var attributes map[string]any
+	var scrubbedAttributes []map[string]any
+	if len(output.Attributes) != 0 {
+		attributevalue.UnmarshalMap(output.Attributes, &attributes)
+		scrubbedAttributes = srv.guardrail.ScrubItems([]map[string]any{attributes})
+	}
+	var attributesMsg = ""
+	if len(scrubbedAttributes) != 0 {
+		scrubbedAttributeJson, _ := json.Marshal(scrubbedAttributes[0])
+		attributesMsg += fmt.Sprintf(", Attributes: %s", scrubbedAttributeJson)
+	}
+	keyJson, _ := json.Marshal(args.Key)
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJson), args.TableName, attributesMsg),
+			},
+		},
+	}, nil, nil
+}
+
+func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchGetItemArgs) (*mcp.CallToolResult, any, error) {
+	if len(args.Keys) == 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error: No keys provided for batch get from table %s", args.TableName),
+				},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	keys := make([]map[string]types.AttributeValue, 0, len(args.Keys))
+	existingKeys := make(map[string]bool)
+
+	for _, key := range args.Keys {
+		keyJson, _ := json.Marshal(key)
+		keyStr := string(keyJson)
+		if existingKeys[keyStr] {
+			continue
+		}
+		existingKeys[keyStr] = true
+
+		av, err := attributevalue.MarshalMap(key)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("Error failed to marshal key %v for table %s: %v", key, args.TableName, err),
+					},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+		keys = append(keys, av)
+	}
+
+	outputResponse := []map[string]types.AttributeValue{}
+	unprocessedKeys := make(map[string]types.KeysAndAttributes)
+	unprocessedMsg := ""
+
+	for start := 0; start < len(keys); start += batchSize {
+		end := start + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+
+		requestItems := map[string]types.KeysAndAttributes{}
+		chunkKey := keys[start:end]
+		requestItems[args.TableName] = types.KeysAndAttributes{
+			Keys: chunkKey,
+		}
+		input := &dynamodb.BatchGetItemInput{
+			RequestItems: requestItems,
+		}
+
+		for i := 0; i < 3; i++ {
+			output, err := srv.db.BatchGetItem(ctx, input)
+			if err != nil {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{
+							Text: fmt.Sprintf("Error when batch getting items from table %s: %v", args.TableName, err),
+						},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+			outputResponse = append(outputResponse, output.Responses[args.TableName]...)
+			if len(output.UnprocessedKeys) > 0 {
+				input.RequestItems = output.UnprocessedKeys
+				// If this is the last retry attempt, save these as permanently unprocessed
+				if i == 2 {
+					// Accumulate failed keys across all 25-item chunks
+					for tableName, ka := range output.UnprocessedKeys {
+						tmpKeys := unprocessedKeys[tableName]
+						tmpKeys.Keys = append(tmpKeys.Keys, ka.Keys...)
+						unprocessedKeys[tableName] = tmpKeys
+					}
+				}
+			} else {
+				break
+			}
+		}
+	}
+
+	if len(unprocessedKeys) > 0 {
+		var failedList []map[string]any
+		for _, ka := range unprocessedKeys {
+			for _, keyAV := range ka.Keys {
+				keyAVTrans := map[string]any{}
+				attributevalue.UnmarshalMap(keyAV, &keyAVTrans)
+				failedList = append(failedList, keyAVTrans)
+			}
+		}
+		failedJson, _ := json.Marshal(failedList)
+		unprocessedMsg = fmt.Sprintf(", Warning: %d keys were not processed (provisioned throughput exceeded). Failed keys: %s", len(failedList), string(failedJson))
+	}
+	scrubbedItems := []map[string]any{}
+	for _, item := range outputResponse {
+		scrubbedItem := map[string]any{}
+		attributevalue.UnmarshalMap(item, &scrubbedItem)
+		scrubbedItems = append(scrubbedItems, scrubbedItem)
+	}
+
+	scrubbedItems = srv.guardrail.ScrubItems(scrubbedItems)
+
+	itemStrings := []string{}
+	for _, item := range scrubbedItems {
+		itemMsg, _ := json.Marshal(item)
+		itemStrings = append(itemStrings, string(itemMsg))
+	}
+
+	itemsJson, _ := json.Marshal(itemStrings)
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: fmt.Sprintf("Successfully batch get %d items from table %s: %s%s", len(scrubbedItems), args.TableName, string(itemsJson), unprocessedMsg),
 			},
 		},
 	}, nil, nil
