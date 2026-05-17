@@ -3,6 +3,8 @@ package engine
 import (
 	"fmt"
 	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 type Guardrail struct {
@@ -12,11 +14,14 @@ type Guardrail struct {
 	protectedTable map[string]bool
 }
 
+const MaxIndividualSize = 400 * 1024
+const MaxBatchSize = 16 * 1024 * 1024
+
 func NewGuardrail(maxLimit int32, defaultLimit int32) *Guardrail {
 	return &Guardrail{
-		maxLimit:       maxLimit,
-		defaultLimit:   defaultLimit,
-		fieldToScrub:   []string{"password", "ssn", "token", "api_key", "secret", "card_number", "credit_card"},
+		maxLimit:     maxLimit,
+		defaultLimit: defaultLimit,
+		fieldToScrub: []string{"password", "ssn", "token", "api_key", "secret", "card_number", "credit_card"},
 		protectedTable: map[string]bool{
 			"Transactions": true,
 			"SystemConfig": true,
@@ -64,4 +69,75 @@ func (g *Guardrail) ValidateDelete(tableName string) error {
 	}
 
 	return nil
+}
+
+func (g *Guardrail) ValidateBatchSize(writeRequests []types.WriteRequest) error {
+	batchSize := 0
+	for _, eachRequest := range writeRequests {
+		size := 0
+		if eachRequest.PutRequest != nil {
+			size = g.estimatedSize(eachRequest.PutRequest.Item)
+		} else if eachRequest.DeleteRequest != nil {
+			size = g.estimatedSize(eachRequest.DeleteRequest.Key)
+		}
+
+		if size > MaxIndividualSize {
+			return fmt.Errorf("Item size exceeds limit of %dKB", MaxIndividualSize/1024)
+		}
+		batchSize += size
+	}
+
+	if batchSize > MaxBatchSize {
+		return fmt.Errorf("Batch size exceeds limit of %dMB", MaxBatchSize/(1024*1024))
+	}
+
+	return nil
+}
+
+func (g *Guardrail) estimatedSize(item map[string]types.AttributeValue) int {
+	size := 0
+	for key, value := range item {
+		size += g.calculateSize(key, value)
+	}
+
+	return size
+}
+
+func (g *Guardrail) calculateSize(key string, value types.AttributeValue) int {
+	size := len(key)
+	switch v := value.(type) {
+	case *types.AttributeValueMemberS:
+		size += len(v.Value)
+	case *types.AttributeValueMemberN:
+		size += len(v.Value)
+	case *types.AttributeValueMemberB:
+		size += len(v.Value)
+	case *types.AttributeValueMemberBOOL:
+		size += 1
+	case *types.AttributeValueMemberNULL:
+		size += 1
+	case *types.AttributeValueMemberSS:
+		// Sum actual string lengths, not just element count
+		for _, s := range v.Value {
+			size += len(s)
+		}
+	case *types.AttributeValueMemberNS:
+		for _, s := range v.Value {
+			size += len(s)
+		}
+	case *types.AttributeValueMemberBS:
+		for _, b := range v.Value {
+			size += len(b)
+		}
+	case *types.AttributeValueMemberL:
+		// Recurse into each list element (no key for list elements)
+		for _, elem := range v.Value {
+			size += g.calculateSize("", elem)
+		}
+	case *types.AttributeValueMemberM:
+		// Recurse into nested map
+		size += g.estimatedSize(v.Value)
+	}
+
+	return size
 }

@@ -358,9 +358,20 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 		if end > len(items) {
 			end = len(items)
 		}
+		batchItems := items[start:end]
+		if err := srv.guardrail.ValidateBatchSize(batchItems); err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("Error when batch putting items to table %s: %v", args.TableName, err),
+					},
+				},
+				IsError: true,
+			}, nil, nil
+		}
 		input := &dynamodb.BatchWriteItemInput{
 			RequestItems: map[string][]types.WriteRequest{
-				args.TableName: items[start:end],
+				args.TableName: batchItems,
 			},
 		}
 		for i := 0; i < 3; i++ {
