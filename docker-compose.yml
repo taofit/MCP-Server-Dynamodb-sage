@@ -4,7 +4,7 @@ services:
     ports:
       - "4566:4566"            # Edge service (All AWS services use this port)
     environment:
-      - SERVICES=dynamodb      # Only start DynamoDB to save RAM
+      - SERVICES=dynamodb,s3      # Start DynamoDB and S3 to prevent S3 request errors
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
       - DYNAMODB_SHARE_DB=1    # Use one DB for all regions (easier for local dev)
     volumes:

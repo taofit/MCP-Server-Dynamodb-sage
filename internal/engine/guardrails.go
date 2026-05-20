@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -136,9 +137,9 @@ func (g *Guardrail) ValidateBatchSize(writeRequests []types.WriteRequest) error 
 	for _, eachRequest := range writeRequests {
 		size := 0
 		if eachRequest.PutRequest != nil {
-			size = g.estimatedSize(eachRequest.PutRequest.Item)
+			size = g.getEstimatedSize(eachRequest.PutRequest.Item)
 		} else if eachRequest.DeleteRequest != nil {
-			size = g.estimatedSize(eachRequest.DeleteRequest.Key)
+			size = g.getEstimatedSize(eachRequest.DeleteRequest.Key)
 		}
 
 		if size > MaxIndividualSize {
@@ -154,13 +155,32 @@ func (g *Guardrail) ValidateBatchSize(writeRequests []types.WriteRequest) error 
 	return nil
 }
 
-func (g *Guardrail) estimatedSize(item map[string]types.AttributeValue) int {
+func (g *Guardrail) getEstimatedSize(item map[string]types.AttributeValue) int {
 	size := 0
 	for key, value := range item {
 		size += g.calculateSize(key, value)
 	}
 
 	return size
+}
+
+func (g *Guardrail) GetEstimatedRCU(item map[string]types.AttributeValue, consistent bool) float64 {
+    rcu := math.Ceil(float64(g.getEstimatedSize(item)) / 4096.0)
+    if !consistent {
+        rcu = rcu * 0.5
+    }
+    if rcu < 0.5 {
+        return 0.5 // minimum is 0.5 RCU for eventually consistent
+    }
+    return rcu
+}
+
+func (g *Guardrail) GetEstimatedWCU(item map[string]types.AttributeValue) float64 {
+    wcu := math.Ceil(float64(g.getEstimatedSize(item)) / 1024.0)
+    if wcu < 1.0 {
+        return 1.0
+    }
+    return wcu
 }
 
 func (g *Guardrail) calculateSize(key string, value types.AttributeValue) int {
@@ -196,7 +216,7 @@ func (g *Guardrail) calculateSize(key string, value types.AttributeValue) int {
 		}
 	case *types.AttributeValueMemberM:
 		// Recurse into nested map
-		size += g.estimatedSize(v.Value)
+		size += g.getEstimatedSize(v.Value)
 	}
 
 	return size

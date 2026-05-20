@@ -22,11 +22,12 @@ type PutItemArgs struct {
 }
 
 type QueryTableArgs struct {
-	TableName                 string         `json:"tableName"`
-	KeyConditionExpression    string         `json:"keyConditionExpression"`
-	ExpressionAttributeValues map[string]any `json:"expressionAttributeValues"`
-	Limit                     int32          `json:"limit"`
-	ExclusiveStartKey         map[string]any `json:"exclusiveStartKey"`
+	TableName                 string            `json:"tableName"`
+	KeyConditionExpression    string            `json:"keyConditionExpression"`
+	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames"`
+	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues"`
+	Limit                     int32             `json:"limit"`
+	ExclusiveStartKey         map[string]any    `json:"exclusiveStartKey"`
 }
 
 type BatchPutItemsArgs struct {
@@ -62,6 +63,10 @@ type UpdateItemArgs struct {
 type BatchGetItemArgs struct {
 	TableName string           `json:"tableName"`
 	Keys      []map[string]any `json:"keys"`
+}
+
+type ReadAuditLogsArgs struct {
+	Limit int `json:"limit"`
 }
 
 const batchSize = 25

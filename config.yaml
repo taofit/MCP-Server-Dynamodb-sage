@@ -19,7 +19,7 @@ protected_tables:
 
 tables:
   - name: "Users"
-    pii_fields: ["email", "phone_number"]
+    pii_fields: ["email", "phone_number"] ## they may be the same as sensitive_fields
     read_only: false
     enforce_schema: true
     columns:

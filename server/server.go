@@ -1,6 +1,7 @@
 package server
 
 import (
+	"dynamodb-sage/internal/audit"
 	"dynamodb-sage/internal/engine"
 	"log"
 	"net/http"
@@ -13,11 +14,11 @@ type Server struct {
 	db        *dynamodb.Client
 	s         *mcp.Server
 	guardrail *engine.Guardrail
+	auditLog  *audit.AuditLog
 }
 
-func New(db *dynamodb.Client, configPath string) *Server {
-
-	s := mcp.NewServer(&mcp.Implementation{
+func New(db *dynamodb.Client, configPath string, dbPath string) *Server {
+	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "dynamo-sage",
 		Version: "1.0.0",
 	}, nil)
@@ -27,9 +28,14 @@ func New(db *dynamodb.Client, configPath string) *Server {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	guardrail := engine.NewGuardrail(*config)
+	auditLog, err := audit.NewAuditLog(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to create audit log: %v", err)
+	}
 	srv := &Server{
 		db:        db,
-		s:         s,
+		auditLog:  auditLog,
+		s:         mcpServer,
 		guardrail: guardrail,
 	}
 	srv.addTools()
@@ -43,14 +49,11 @@ func (srv *Server) SSEHandler() http.Handler {
 	}, nil)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set up a single route with CORS support for the inspector
-		// Allow the MCP Inspector (or any origin) to connect
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
-		// Handle preflight requests
-		if r.Method == "OPTIONS" {
+		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}

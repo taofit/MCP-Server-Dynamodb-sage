@@ -26,6 +26,11 @@ type AppConfig struct {
 	Tables          []TableConfig `yaml:"tables"`
 }
 
+const (
+	DefaultMaxLimit     int32 = 100
+	DefaultDefaultLimit int32 = 20
+)
+
 func LoadConfig(filename string) (*AppConfig, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -35,12 +40,16 @@ func LoadConfig(filename string) (*AppConfig, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
-	if config.GlobalLimits.MaxLimit <= 0 {
-		config.GlobalLimits.MaxLimit = 100
+	if config.GlobalLimits.MaxLimit <= 0 || config.GlobalLimits.MaxLimit > DefaultMaxLimit {
+		config.GlobalLimits.MaxLimit = DefaultMaxLimit
 	}
 
-	if config.GlobalLimits.DefaultLimit <= 0 {
-		config.GlobalLimits.DefaultLimit = 20
+	if config.GlobalLimits.DefaultLimit <= 0 || config.GlobalLimits.DefaultLimit > DefaultMaxLimit {
+		config.GlobalLimits.DefaultLimit = DefaultDefaultLimit
+	}
+	// Ensure DefaultLimit does not exceed MaxLimit
+	if config.GlobalLimits.DefaultLimit > config.GlobalLimits.MaxLimit {
+		config.GlobalLimits.DefaultLimit = config.GlobalLimits.MaxLimit
 	}
 
 	return &config, nil

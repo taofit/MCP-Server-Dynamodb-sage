@@ -29,6 +29,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Ignore the local audit database
+.data/
+*.db
 # Dependencies
 # (Uncomment if you use vendor directory)
 # vendor/

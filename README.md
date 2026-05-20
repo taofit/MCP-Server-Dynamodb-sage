@@ -161,4 +161,17 @@ To use this server with Claude Desktop, you need a bridge because Claude primari
 }
 ```
 
+## Production
+1. You set the `AUDIT_DB_PATH` environment variable in your (Terraform/Cloudformation) to /mnt/data/audit.db. Your Go code automatically switches to the high-security storage volume without you changing a single line of code.
+example terraform code for mount points:
+```mountPoints = [
+      {
+        sourceVolume  = "audit-storage"
+        containerPath = "/mnt/data" # This is where Go looks!
+        readOnly      = false
+      }
+    ]
+```
+2. 
+
 > **Note**: Your Go server (`go run main.go`) must be running for Claude to connect.

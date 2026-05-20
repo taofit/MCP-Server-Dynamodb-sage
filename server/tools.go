@@ -30,7 +30,7 @@ func (srv *Server) addTools() {
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "scan_table",
-		Description: "Read items from a DynamoDB table (returns up to 20 items)",
+		Description: "⚠️ EXPENSIVE: Scans the entire table consuming high RCU. Only use as a last resort when no key or GSI is available. ALWAYS prefer query_table with a GSI index if the access pattern is known. Scanning large tables can be very costly.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -84,7 +84,7 @@ func (srv *Server) addTools() {
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "query_table",
-		Description: "Query a table using a key condition expression and optional filter expression (returns up to 20 items each time)",
+		Description: "PREFERRED over scan_table. Efficiently query a table using a key condition or GSI index. Much cheaper and faster than scanning. Use this whenever you know the partition key or have a GSI available.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -100,6 +100,10 @@ func (srv *Server) addTools() {
 					"type":        "object",
 					"description": "The expression attribute values for the query",
 				},
+				"expressionAttributeNames": map[string]any{
+					"type":        "object",
+					"description": "The expression attribute names for the query",
+				},
 				"limit": map[string]any{
 					"type":        "integer",
 					"description": "The maximum number of items to return",
@@ -108,7 +112,7 @@ func (srv *Server) addTools() {
 					"type":        "object",
 					"description": "The exclusive start key for the query(pagination parameter)",
 				},
-			},
+			}, 
 			"required": []string{"tableName", "keyConditionExpression", "expressionAttributeValues"},
 		},
 	}, srv.queryTable)
@@ -173,7 +177,7 @@ func (srv *Server) addTools() {
 				},
 			},
 			"required": []string{"tableName", "key"},
-		},
+		}, 
 	}, srv.deleteItem)
 
 	mcp.AddTool(srv.s, &mcp.Tool{
@@ -192,7 +196,7 @@ func (srv *Server) addTools() {
 				},
 			},
 			"required": []string{"tableName", "key"},
-		},
+		}, 
 	}, srv.getItem)
 
 	mcp.AddTool(srv.s, &mcp.Tool{
@@ -238,7 +242,7 @@ func (srv *Server) addTools() {
 				},
 			},
 			"required": []string{"tableName", "key", "updateExpression"},
-		},
+		}, 
 	}, srv.updateItem)
 
 	mcp.AddTool(srv.s, &mcp.Tool{
@@ -262,4 +266,28 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName", "keys"},
 		},
 	}, srv.batchGetItems)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "read_audit_logs",
+		Description: "Read audit logs from sqlite database",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				// "startTime": map[string]any{
+				// 	"type":        "string",
+				// 	"description": "The start time for the audit logs",
+				// },
+				// "endTime": map[string]any{
+				// 	"type":        "string",
+				// 	"description": "The end time for the audit logs",
+				// },
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "The limit of audit logs to read",
+					"default":     20,
+				},
+			},
+			"required": []string{"limit"},
+		},
+	}, srv.readAuditLogs)
 }
