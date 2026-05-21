@@ -1,6 +1,8 @@
 # dynamodb-sage
 
-A Go project using DynamoDB via LocalStack for local development.
+An MCP (Model Context Protocol) server that acts as a DynamoDB gateway — enabling LLMs to perform safe, guarded operations on DynamoDB tables through natural language.
+
+[![Demo Video](https://img.youtube.com/vi/zt_6hMwcw2c/maxresdefault.jpg)](https://www.youtube.com/watch?v=zt_6hMwcw2c)
 
 ## Prerequisites
 
@@ -100,7 +102,7 @@ The server will start listening on port `3001` (or the port configured in `main.
 ### 2. Run the MCP Inspector
 In another terminal, run the inspector pointing to your server's SSE endpoint:
 ```bash
-npx @modelcontextprotocol/inspector http://localhost:3001/sse
+npx @modelcontextprotocol/inspector http://localhost:3001/sse or http://localhost:8080(show in main.go)
 ```
 
 ### 3. Using the Inspector
@@ -154,7 +156,7 @@ To use this server with Claude Desktop, you need a bridge because Claude primari
         "-y",
         "supergateway",
         "--sse",
-        "http://localhost:3001/sse"
+        "http://localhost:3001/sse" # or http://localhost:8080/sse
       ]
     }
   }

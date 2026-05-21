@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"dynamodb-sage/internal/audit"
 	"dynamodb-sage/internal/engine"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -15,9 +17,11 @@ type Server struct {
 	s         *mcp.Server
 	guardrail *engine.Guardrail
 	auditLog  *audit.AuditLog
+	userID    string
+	userARN   string
 }
 
-func New(db *dynamodb.Client, configPath string, dbPath string) *Server {
+func New(db *dynamodb.Client, userID, userARN, configPath, dbPath string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "dynamo-sage",
 		Version: "1.0.0",
@@ -37,6 +41,8 @@ func New(db *dynamodb.Client, configPath string, dbPath string) *Server {
 		auditLog:  auditLog,
 		s:         mcpServer,
 		guardrail: guardrail,
+		userID:    userID,
+		userARN:   userARN,
 	}
 	srv.addTools()
 
@@ -60,4 +66,17 @@ func (srv *Server) SSEHandler() http.Handler {
 
 		sseHandler.ServeHTTP(w, r)
 	})
+}
+
+func (srv *Server) ServeStdio() error {
+	log.Printf("Starting dynamo-sage MCP server on standard IO")
+	return srv.s.Run(context.Background(), &mcp.StdioTransport{})
+}
+
+func (srv *Server) ServeHTTP(addr string) error {
+	if v := os.Getenv("DYNAMO_SAGE_ADDR"); v != "" {
+		addr = v
+	}
+	log.Printf("starting dynamo-sage MCP server on %s", addr)
+	return http.ListenAndServe(addr, srv.SSEHandler())
 }

@@ -1,5 +1,6 @@
 # Binaries and executables
 /dynamodb-sage
+/dynamo-sage
 /main
 *.exe
 *.exe~

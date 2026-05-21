@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "dynamo-sage": {
+      "type": "local",
+      "command": ["./dynamo-sage"],
+      "enabled": true,
+      "env": {
+        "DYNAMO_SAGE_CONFIG": "config.yaml",
+        "DYNAMO_SAGE_DB": "data/audit.db",
+        "DYNAMO_SAGE_ADDR": ":8080"
+      }
+    }
+  }
+}

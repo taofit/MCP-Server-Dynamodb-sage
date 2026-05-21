@@ -650,15 +650,16 @@ func (srv *Server) validateSchema(tableName string, av map[string]types.Attribut
 }
 
 func (srv *Server) generateAuditEntry(operation string, tableName string, consumedCapacity float64, capacityType string, status string) audit.AuditEntry {
+	msg := fmt.Sprintf("%s performed on table %s with status %s", operation, tableName, status)
 	return audit.AuditEntry{
 		Timestamp:             time.Now(),
 		Operation:             operation,
 		TableName:             tableName,
-		User:                  "system", // User ID is hardcoded for now, it should be fetched from bearer token in the header
+		User:                  srv.userID,
 		CapacityUnitsConsumed: consumedCapacity,
 		CapacityType:          capacityType,
 		Status:                status,
-		Message:               fmt.Sprintf("%s performed on table %s with status %s", operation, tableName, status),
+		Message:               fmt.Sprintf("%s [user: %s, ARN: %s]", msg, srv.userID, srv.userARN),
 	}
 }
 
