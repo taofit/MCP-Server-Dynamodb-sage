@@ -62,9 +62,9 @@ func (a *AuditLog) processQueue() {
 	}()
 }
 
-func (a *AuditLog) ReadAuditHistory(limit int) ([]AuditEntry, error) {
-	query := `SELECT timestamp, operation, table_name, user, capacity_units_consumed, capacity_type, status, message FROM audit_logs ORDER BY timestamp DESC LIMIT ?`
-	rows, err := a.db.Query(query, limit)
+func (a *AuditLog) ReadAuditHistory(limit int32, startTime time.Time, endTime time.Time) ([]AuditEntry, error) {
+	query := `SELECT timestamp, operation, table_name, user, capacity_units_consumed, capacity_type, status, message FROM audit_logs WHERE timestamp BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT ?`
+	rows, err := a.db.Query(query, startTime, endTime, limit)
 	if err != nil {
 		return nil, err
 	}

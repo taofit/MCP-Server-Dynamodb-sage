@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -112,7 +114,7 @@ func (srv *Server) addTools() {
 					"type":        "object",
 					"description": "The exclusive start key for the query(pagination parameter)",
 				},
-			}, 
+			},
 			"required": []string{"tableName", "keyConditionExpression", "expressionAttributeValues"},
 		},
 	}, srv.queryTable)
@@ -177,7 +179,7 @@ func (srv *Server) addTools() {
 				},
 			},
 			"required": []string{"tableName", "key"},
-		}, 
+		},
 	}, srv.deleteItem)
 
 	mcp.AddTool(srv.s, &mcp.Tool{
@@ -196,7 +198,7 @@ func (srv *Server) addTools() {
 				},
 			},
 			"required": []string{"tableName", "key"},
-		}, 
+		},
 	}, srv.getItem)
 
 	mcp.AddTool(srv.s, &mcp.Tool{
@@ -242,7 +244,7 @@ func (srv *Server) addTools() {
 				},
 			},
 			"required": []string{"tableName", "key", "updateExpression"},
-		}, 
+		},
 	}, srv.updateItem)
 
 	mcp.AddTool(srv.s, &mcp.Tool{
@@ -273,18 +275,20 @@ func (srv *Server) addTools() {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				// "startTime": map[string]any{
-				// 	"type":        "string",
-				// 	"description": "The start time for the audit logs",
-				// },
-				// "endTime": map[string]any{
-				// 	"type":        "string",
-				// 	"description": "The end time for the audit logs",
-				// },
+				"startTime": map[string]any{
+					"type":        "string",
+					"description": "The start time for the audit logs in RFC3339 format. Default is 7 days ago.",
+					"default":     time.Now().AddDate(0, 0, -7).Format(time.RFC3339),
+				},
+				"endTime": map[string]any{
+					"type":        "string",
+					"description": "The end time for the audit logs in RFC3339 format. Default is now.",
+					"default":     time.Now().Format(time.RFC3339),
+				},
 				"limit": map[string]any{
 					"type":        "integer",
 					"description": "The limit of audit logs to read",
-					"default":     20,
+					"default":     auditLogDefaultLimit,
 				},
 			},
 			"required": []string{"limit"},

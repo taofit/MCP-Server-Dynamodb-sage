@@ -28,7 +28,7 @@ type AppConfig struct {
 
 const (
 	DefaultMaxLimit     int32 = 100
-	DefaultDefaultLimit int32 = 20
+	DefaultLimit int32 = 20
 )
 
 func LoadConfig(filename string) (*AppConfig, error) {
@@ -45,7 +45,7 @@ func LoadConfig(filename string) (*AppConfig, error) {
 	}
 
 	if config.GlobalLimits.DefaultLimit <= 0 || config.GlobalLimits.DefaultLimit > DefaultMaxLimit {
-		config.GlobalLimits.DefaultLimit = DefaultDefaultLimit
+		config.GlobalLimits.DefaultLimit = DefaultLimit
 	}
 	// Ensure DefaultLimit does not exceed MaxLimit
 	if config.GlobalLimits.DefaultLimit > config.GlobalLimits.MaxLimit {

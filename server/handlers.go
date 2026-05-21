@@ -633,7 +633,34 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 
 // readAuditLogs does not call sendAuditLog, so no change needed here.
 func (srv *Server) readAuditLogs(ctx context.Context, req *mcp.CallToolRequest, args *ReadAuditLogsArgs) (*mcp.CallToolResult, any, error) {
-	logs, err := srv.auditLog.ReadAuditHistory(args.Limit)
+	limit, _ := srv.guardrail.EnforceLimit(args.Limit)
+
+	var startTime, endTime time.Time
+	if args.StartTime != "" {
+		var err error
+		startTime, err = time.Parse(time.RFC3339, args.StartTime)
+		if err != nil {
+			return srv.errorResult(fmt.Sprintf("Error when parsing start time: %v", err)), nil, nil
+		}
+	}
+	if args.EndTime != "" {
+		var err error
+		endTime, err = time.Parse(time.RFC3339, args.EndTime)
+		if err != nil {
+			return srv.errorResult(fmt.Sprintf("Error when parsing end time: %v", err)), nil, nil
+		}
+	}
+	// Set defaults if times are zero
+	if startTime.IsZero() {
+		startTime = time.Unix(0, 0)
+	}
+	if endTime.IsZero() {
+		endTime = time.Now()
+	}
+	if startTime.After(endTime) {
+		return srv.errorResult(fmt.Sprintf("Error when parsing start time: start time must be before end time: %v - %v", startTime, endTime)), nil, nil
+	}
+	logs, err := srv.auditLog.ReadAuditHistory(limit, startTime, endTime)
 	if err != nil {
 		return srv.errorResult(fmt.Sprintf("Error when reading audit logs: %v", err)), nil, nil
 	}

@@ -66,7 +66,10 @@ type BatchGetItemArgs struct {
 }
 
 type ReadAuditLogsArgs struct {
-	Limit int `json:"limit"`
+	StartTime string `json:"startTime"`
+	EndTime   string `json:"endTime"`
+	Limit     int32  `json:"limit"`
 }
 
 const batchSize = 25
+const auditLogDefaultLimit = 20
