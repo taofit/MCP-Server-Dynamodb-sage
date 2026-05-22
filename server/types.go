@@ -71,5 +71,31 @@ type ReadAuditLogsArgs struct {
 	Limit     int32  `json:"limit"`
 }
 
+type CreateTableArgs struct {
+	TableName            string                `json:"tableName"`
+	KeySchema            []KeySchema           `json:"keySchema"`
+	AttributeDefinitions []AttributeDefinition `json:"attributeDefinitions"`
+	BillingMode          string                `json:"billingMode"`
+	GSIs                 []GSI                 `json:"gsis"`
+	ReadCapacityUnits    int64                 `json:"readCapacityUnits,omitempty"`
+	WriteCapacityUnits   int64                 `json:"writeCapacityUnits,omitempty"`
+}
+
+type GSI struct {
+	IndexName    string `json:"indexName"`
+	PartitionKey string `json:"partitionKey"`
+	SortKey      string `json:"sortKey"`
+}
+
+type KeySchema struct {
+	AttributeName string `json:"attributeName"`
+	KeyType       string `json:"keyType"`
+}
+
+type AttributeDefinition struct {
+	AttributeName string `json:"attributeName"`
+	AttributeType string `json:"attributeType"`
+}
+
 const batchSize = 25
-const auditLogDefaultLimit = 20
+const defaultLimit = 20

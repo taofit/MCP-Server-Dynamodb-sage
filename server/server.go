@@ -21,6 +21,10 @@ type Server struct {
 	userARN   string
 }
 
+type AuditBackend interface {
+	LogActivity(entry audit.AuditEntry)
+}
+
 func New(db *dynamodb.Client, userID, userARN, configPath, dbPath string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "dynamo-sage",
@@ -79,4 +83,8 @@ func (srv *Server) ServeHTTP(addr string) error {
 	}
 	log.Printf("starting dynamo-sage MCP server on %s", addr)
 	return http.ListenAndServe(addr, srv.SSEHandler())
+}
+
+func (srv *Server) RecordActionLog(backend AuditBackend, entry audit.AuditEntry) {
+    backend.LogActivity(entry)
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -55,6 +56,7 @@ func (srv *Server) addTools() {
 				"limit": map[string]any{
 					"type":        "integer",
 					"description": "The maximum number of items to return",
+					"default": 	   defaultLimit,
 				},
 				"exclusiveStartKey": map[string]any{
 					"type":        "object",
@@ -109,6 +111,7 @@ func (srv *Server) addTools() {
 				"limit": map[string]any{
 					"type":        "integer",
 					"description": "The maximum number of items to return",
+					"default":     defaultLimit,
 				},
 				"exclusiveStartKey": map[string]any{
 					"type":        "object",
@@ -288,10 +291,101 @@ func (srv *Server) addTools() {
 				"limit": map[string]any{
 					"type":        "integer",
 					"description": "The limit of audit logs to read",
-					"default":     auditLogDefaultLimit,
+					"default":     defaultLimit,
 				},
 			},
 			"required": []string{"limit"},
 		},
 	}, srv.readAuditLogs)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "create_optimized_table",
+		Description: "Create an optimized DynamoDB table using the best practices",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to create",
+				},
+				"keySchema": map[string]any{
+					"type":        "array",
+					"description": "The key schema for the table",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"attributeName": map[string]any{
+								"type":        "string",
+								"description": "The name of the attribute",
+							},
+							"keyType": map[string]any{
+								"type":        "string",
+								"description": "The type of the key",
+								"enum": []string{string(types.KeyTypeHash), string(types.KeyTypeRange)},
+							},
+						},
+						"required": []string{"attributeName", "keyType"},
+					},
+				},
+				"attributeDefinitions": map[string]any{
+					"type":        "array",
+					"description": "The attributes for the table",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"attributeName": map[string]any{
+								"type":        "string",
+								"description": "The name of the attribute",
+							},
+							"attributeType": map[string]any{
+								"type":        "string",
+								"description": "The type of the attribute",
+								"enum": []string{"S", "N", "B"},
+							},
+						},
+						"required": []string{"attributeName", "attributeType"},
+					},
+				},
+				"billingMode": map[string]any{
+					"type":        "string",
+					"description": "The billing mode for the table",
+					"enum": []string{string(types.BillingModePayPerRequest), string(types.BillingModeProvisioned)},
+					"default":     string(types.BillingModePayPerRequest),
+				},
+				"gsis": map[string]any{
+					"type": "array",
+					"description": "The global secondary indexes for the table",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"indexName": map[string]any{
+								"type":        "string",
+								"description": "The name of the index",
+							},
+							"partitionKey": map[string]any{
+								"type":        "string",
+								"description": "The name of the partition key",
+							},
+							"sortKey": map[string]any{
+								"type":        "string",
+								"description": "The name of the sort key",
+							},
+							"readCapacityUnits": map[string]any{
+								"type":        "integer",
+								"description": "The read capacity units for the index",
+								"minimum":     1,
+							},
+							"writeCapacityUnits": map[string]any{
+								"type":        "integer",
+								"description": "The write capacity units for the index",
+								"minimum":     1,
+							},
+						},
+						"required": []string{"indexName", "partitionKey"},
+					},
+				},
+			},
+			"required": []string{"tableName", "keySchema"},
+		},
+	}, srv.createOptimizedTable)
 }
