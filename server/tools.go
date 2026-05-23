@@ -340,7 +340,7 @@ func (srv *Server) addTools() {
 							"attributeType": map[string]any{
 								"type":        "string",
 								"description": "The type of the attribute",
-								"enum": []string{"S", "N", "B"},
+								"enum":        []string{string(types.ScalarAttributeTypeS), string(types.ScalarAttributeTypeN), string(types.ScalarAttributeTypeB)},
 							},
 						},
 						"required": []string{"attributeName", "attributeType"},
@@ -388,4 +388,19 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName", "keySchema"},
 		},
 	}, srv.createOptimizedTable)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name: "delete_table",
+		Description: "Delete a table",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to delete",
+				},
+			},
+			"required": []string{"tableName"},
+		},
+	}, srv.deleteTable)
 }

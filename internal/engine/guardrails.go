@@ -126,7 +126,7 @@ func (g *Guardrail) isSensitiveField(field string) bool {
 
 func (g *Guardrail) ValidateProtectedTable(tableName string) error {
 	if _, ok := g.protectedTable[tableName]; ok {
-		return fmt.Errorf("Access is denied to table %s", tableName)
+		return fmt.Errorf("table %s is protected and cannot be modified", tableName)
 	}
 
 	return nil

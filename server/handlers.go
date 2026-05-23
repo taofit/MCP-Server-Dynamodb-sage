@@ -685,44 +685,50 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		}
 	}
 
-	var attributeDefinitions []types.AttributeDefinition
-	for _, attrDef := range args.AttributeDefinitions {
-		attributeDefinitions = append(attributeDefinitions, types.AttributeDefinition{
-			AttributeName: aws.String(attrDef.AttributeName),
-			AttributeType: types.ScalarAttributeType(attrDef.AttributeType),
-		})
-	}
-
-	definedAttributes := make(map[string]bool)
-	for _, attrDef := range attributeDefinitions {
-		definedAttributes[*attrDef.AttributeName] = true
-	}
-
-	for _, k := range args.KeySchema {
-		if definedAttributes[k.AttributeName] {
-			continue
+	providedAttributeTypes := make(map[string]types.ScalarAttributeType)
+    for _, ad := range args.AttributeDefinitions {
+		if _, ok := providedAttributeTypes[ad.AttributeName]; !ok {
+			providedAttributeTypes[ad.AttributeName] = types.ScalarAttributeType(ad.AttributeType)
 		}
-		attributeDefinitions = append(attributeDefinitions, types.AttributeDefinition{
-			AttributeName: aws.String(k.AttributeName),
-			AttributeType: types.ScalarAttributeType("S"),
-		})
-		definedAttributes[k.AttributeName] = true
+	}
+
+    attributeDefinitionMap := make(map[string]types.AttributeDefinition)
+
+	addAttribute := func(attributeName string) {
+		if _, ok := attributeDefinitionMap[attributeName]; ok {
+			return
+		}
+		attributeType, ok := providedAttributeTypes[attributeName]
+		if !ok {
+			attributeType = types.ScalarAttributeTypeS
+		}
+		attributeDefinitionMap[attributeName] = types.AttributeDefinition{
+			AttributeName: aws.String(attributeName),
+			AttributeType: attributeType,
+		}
+	}
+	for _, k := range args.KeySchema {
+		addAttribute(k.AttributeName)
 	}
 
 	var gsis []types.GlobalSecondaryIndex
 	for _, gsi := range args.GSIs {
+		gsiKeySchema := []types.KeySchemaElement{
+			{
+				AttributeName: aws.String(gsi.PartitionKey),
+				KeyType:       types.KeyTypeHash,
+			},
+		}
+		if gsi.SortKey != "" {
+			gsiKeySchema = append(gsiKeySchema, types.KeySchemaElement{
+				AttributeName: aws.String(gsi.SortKey),
+				KeyType:       types.KeyTypeRange,
+			})
+		}
+
 		gsis = append(gsis, types.GlobalSecondaryIndex{
 			IndexName: aws.String(gsi.IndexName),
-			KeySchema: []types.KeySchemaElement{
-				{
-					AttributeName: aws.String(gsi.PartitionKey),
-					KeyType:       types.KeyTypeHash,
-				},
-				{
-					AttributeName: aws.String(gsi.SortKey),
-					KeyType:       types.KeyTypeRange,
-				},
-			},
+			KeySchema: gsiKeySchema,
 			Projection: &types.Projection{
 				ProjectionType: types.ProjectionTypeAll,
 			},
@@ -730,26 +736,19 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		})
 	}
  	for _, gsi := range args.GSIs {
-		if !definedAttributes[gsi.PartitionKey] {
-			attributeDefinitions = append(attributeDefinitions, types.AttributeDefinition{
-				AttributeName: aws.String(gsi.PartitionKey),
-				AttributeType: types.ScalarAttributeType("S"),
-			})
-			definedAttributes[gsi.PartitionKey] = true
-		}
-		if gsi.SortKey != "" && !definedAttributes[gsi.SortKey] {
-			attributeDefinitions = append(attributeDefinitions, types.AttributeDefinition{
-				AttributeName: aws.String(gsi.SortKey),
-				AttributeType: types.ScalarAttributeType("S"),
-			})
-			definedAttributes[gsi.SortKey] = true
+		addAttribute(gsi.PartitionKey)
+		if gsi.SortKey != "" {
+			addAttribute(gsi.SortKey)
 		}
 	}
-
+	attributeDefinitionList := make([]types.AttributeDefinition, 0, len(attributeDefinitionMap))
+	for _, ad := range attributeDefinitionMap {
+		attributeDefinitionList = append(attributeDefinitionList, ad)
+	}
 	output, err := srv.db.CreateTable(ctx, &dynamodb.CreateTableInput{
 		TableName:              aws.String(args.TableName),
 		KeySchema:              keySchema,
-		AttributeDefinitions:   attributeDefinitions,
+		AttributeDefinitions:   attributeDefinitionList,
 		BillingMode:            types.BillingMode(args.BillingMode),
 		GlobalSecondaryIndexes: gsis,
 		ProvisionedThroughput:  srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
@@ -759,7 +758,22 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		return srv.errorResult(fmt.Sprintf("CreateTable %s failed: %v", args.TableName, err)), nil, nil
 	}
 	srv.sendAuditLog("create_table", args.TableName, "", nil, nil)
-	return srv.successResult(fmt.Sprintf("Successfully created table %s\n Table description: %v\n", args.TableName, output.TableDescription)), nil, nil
+	return srv.successResult(fmt.Sprintf("Successfully created table %s\n Table description: %v\n Metadata: %v\n", args.TableName, output.TableDescription, output.ResultMetadata)), nil, nil
+}
+
+func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, args *DeleteTableArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("DeleteTable: %v", err)), nil, nil
+	}
+	_, err := srv.db.DeleteTable(ctx, &dynamodb.DeleteTableInput{
+		TableName: aws.String(args.TableName),
+	})
+	if err != nil {
+		srv.sendAuditLog("delete_table", args.TableName, "", nil, err)
+		return srv.errorResult(fmt.Sprintf("DeleteTable %s failed: %v", args.TableName, err)), nil, nil
+	}
+	srv.sendAuditLog("delete_table", args.TableName, "", nil, nil)
+	return srv.successResult(fmt.Sprintf("Successfully deleted table %s", args.TableName)), nil, nil
 }
 
 // readAuditLogs does not call sendAuditLog, so no change needed here.

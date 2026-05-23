@@ -7,6 +7,10 @@ type DescribeTableArgs struct {
 	TableName string `json:"tableName"`
 }
 
+type DeleteTableArgs struct {
+	TableName string `json:"tableName"`
+}
+
 type ScanTableArgs struct {
 	TableName                 string         `json:"tableName"`
 	ExpressionAttributeValues map[string]any `json:"expressionAttributeValues"`
