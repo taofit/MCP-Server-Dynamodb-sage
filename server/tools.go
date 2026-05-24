@@ -384,6 +384,24 @@ func (srv *Server) addTools() {
 						"required": []string{"indexName", "partitionKey"},
 					},
 				},
+				"lsis": map[string]any{
+					"type": "array",
+					"description": "The local secondary indexes for the table",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"indexName": map[string]any{
+								"type":        "string",
+								"description": "The name of the index",
+							},
+							"sortKey": map[string]any{
+								"type":        "string",
+								"description": "The name of the sort key",
+							},
+						},
+						"required": []string{"indexName", "sortKey"},
+					},
+				},
 			},
 			"required": []string{"tableName", "keySchema"},
 		},

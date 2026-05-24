@@ -102,7 +102,7 @@ The server will start listening on port `3001` (or the port configured in `main.
 ### 2. Run the MCP Inspector
 In another terminal, run the inspector pointing to your server's SSE endpoint:
 ```bash
-npx @modelcontextprotocol/inspector http://localhost:3001/sse or http://localhost:8080(show in main.go)
+npx @modelcontextprotocol/inspector http://localhost:3001/sse or http://localhost:8080/sse(show in main.go)
 ```
 
 ### 3. Using the Inspector

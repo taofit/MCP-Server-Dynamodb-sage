@@ -172,7 +172,7 @@ func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, 
 			for _, key := range gsi.KeySchema {
 				keySchema = append(keySchema, fmt.Sprintf("%s (%s)", *key.AttributeName, key.KeyType))
 			}
-			gsis = append(gsis, fmt.Sprintf("%s: %s", *gsi.IndexName, strings.Join(keySchema, ", ")))
+			gsis = append(gsis, fmt.Sprintf("%s: %s\n", *gsi.IndexName, strings.Join(keySchema, ", ")))
 		}
 	}
 	var lsis []string
@@ -182,7 +182,7 @@ func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, 
 			for _, key := range lsi.KeySchema {
 				keySchema = append(keySchema, fmt.Sprintf("%s (%s)", *key.AttributeName, key.KeyType))
 			}
-			lsis = append(lsis, fmt.Sprintf("%s: %s\n", lsi.IndexName, strings.Join(keySchema, ", ")))
+			lsis = append(lsis, fmt.Sprintf("%s: %s\n", *lsi.IndexName, strings.Join(keySchema, "")))
 		}
 	}
 
@@ -190,10 +190,10 @@ func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, 
 	details := fmt.Sprintf("Table: %s\nStatus: %s\nItem Count: %d\nSize (Bytes): %d\nKey Schema: %s\nAttribute Definitions: %s\n",
 		tableName, out.Table.TableStatus, itemCount, sizeBytes, strings.Join(keySchema, ", "), strings.Join(attributeDefinitions, ", "))
 	if len(gsis) > 0 {
-		details += fmt.Sprintf("Global Secondary Indexes (GSIs):\n%s\n", strings.Join(gsis, "\n"))
+		details += fmt.Sprintf("Global Secondary Indexes (GSIs): \n%s", strings.Join(gsis, ""))
 	}
 	if len(lsis) > 0 {
-		details += fmt.Sprintf("Local Secondary Indexes (LSIs):\n%s\n", strings.Join(lsis, "\n"))
+		details += fmt.Sprintf("Local Secondary Indexes (LSIs): \n%s", strings.Join(lsis, ""))
 	}
 	srv.sendAuditLog("describe_table", args.TableName, "", nil, nil)
 	return srv.successResult(details), nil, nil
@@ -670,29 +670,16 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 }
 
 func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRequest, args *CreateTableArgs) (*mcp.CallToolResult, any, error) {
-	var keySchema []types.KeySchemaElement
-	for _, schema := range args.KeySchema {
-		if schema.KeyType == string(types.KeyTypeHash) {
-			keySchema = append(keySchema, types.KeySchemaElement{
-				AttributeName: aws.String(schema.AttributeName),
-				KeyType:       types.KeyTypeHash,
-			})
-		} else {
-			keySchema = append(keySchema, types.KeySchemaElement{
-				AttributeName: aws.String(schema.AttributeName),
-				KeyType:       types.KeyTypeRange,
-			})
-		}
-	}
+	keySchema, hashKey := srv.getKeySchema(args.KeySchema)
 
 	providedAttributeTypes := make(map[string]types.ScalarAttributeType)
-    for _, ad := range args.AttributeDefinitions {
+	for _, ad := range args.AttributeDefinitions {
 		if _, ok := providedAttributeTypes[ad.AttributeName]; !ok {
 			providedAttributeTypes[ad.AttributeName] = types.ScalarAttributeType(ad.AttributeType)
 		}
 	}
 
-    attributeDefinitionMap := make(map[string]types.AttributeDefinition)
+	attributeDefinitionMap := make(map[string]types.AttributeDefinition)
 
 	addAttribute := func(attributeName string) {
 		if _, ok := attributeDefinitionMap[attributeName]; ok {
@@ -711,36 +698,19 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		addAttribute(k.AttributeName)
 	}
 
-	var gsis []types.GlobalSecondaryIndex
+	var gsis = srv.getGSIs(args)
 	for _, gsi := range args.GSIs {
-		gsiKeySchema := []types.KeySchemaElement{
-			{
-				AttributeName: aws.String(gsi.PartitionKey),
-				KeyType:       types.KeyTypeHash,
-			},
-		}
-		if gsi.SortKey != "" {
-			gsiKeySchema = append(gsiKeySchema, types.KeySchemaElement{
-				AttributeName: aws.String(gsi.SortKey),
-				KeyType:       types.KeyTypeRange,
-			})
-		}
-
-		gsis = append(gsis, types.GlobalSecondaryIndex{
-			IndexName: aws.String(gsi.IndexName),
-			KeySchema: gsiKeySchema,
-			Projection: &types.Projection{
-				ProjectionType: types.ProjectionTypeAll,
-			},
-			ProvisionedThroughput: srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
-		})
-	}
- 	for _, gsi := range args.GSIs {
 		addAttribute(gsi.PartitionKey)
 		if gsi.SortKey != "" {
 			addAttribute(gsi.SortKey)
 		}
 	}
+
+	var lsis = srv.getLsis(args, hashKey)
+	for _, lsi := range args.LSIs {
+		addAttribute(lsi.SortKey)
+	}
+
 	attributeDefinitionList := make([]types.AttributeDefinition, 0, len(attributeDefinitionMap))
 	for _, ad := range attributeDefinitionMap {
 		attributeDefinitionList = append(attributeDefinitionList, ad)
@@ -751,14 +721,17 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		AttributeDefinitions:   attributeDefinitionList,
 		BillingMode:            types.BillingMode(args.BillingMode),
 		GlobalSecondaryIndexes: gsis,
+		LocalSecondaryIndexes:  lsis,
 		ProvisionedThroughput:  srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
 	})
 	if err != nil {
 		srv.sendAuditLog("create_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("CreateTable %s failed: %v", args.TableName, err)), nil, nil
 	}
+	attributeDefinitions := srv.getAttributeDefinitions(output.TableDescription.AttributeDefinitions)
 	srv.sendAuditLog("create_table", args.TableName, "", nil, nil)
-	return srv.successResult(fmt.Sprintf("Successfully created table %s\n Table description: %v\n Metadata: %v\n", args.TableName, output.TableDescription, output.ResultMetadata)), nil, nil
+
+	return srv.successResult(fmt.Sprintf("Successfully created table \"%s\"\n Attribute definitions: %s", args.TableName, strings.Join(attributeDefinitions, ", "))), nil, nil
 }
 
 func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, args *DeleteTableArgs) (*mcp.CallToolResult, any, error) {
@@ -897,4 +870,88 @@ func (srv *Server) getProvisionedThroughput(billingMode string, readUnits, write
 		}
 	}
 	return nil
+}
+
+func (srv *Server) getKeySchema(keySchema []KeySchema) ([]types.KeySchemaElement, string) {
+	var keySchemaElements []types.KeySchemaElement
+	var hashKey string
+	for _, ks := range keySchema {
+		if ks.KeyType == string(types.KeyTypeHash) {
+			hashKey = ks.AttributeName
+			keySchemaElements = append(keySchemaElements, types.KeySchemaElement{
+				AttributeName: aws.String(ks.AttributeName),
+				KeyType:       types.KeyTypeHash,
+			})
+		} else {
+			keySchemaElements = append(keySchemaElements, types.KeySchemaElement{
+				AttributeName: aws.String(ks.AttributeName),
+				KeyType:       types.KeyTypeRange,
+			})
+		}
+	}
+
+	return keySchemaElements, hashKey
+}
+
+func (srv *Server) getGSIs(args *CreateTableArgs) []types.GlobalSecondaryIndex {
+	var gsisList []types.GlobalSecondaryIndex
+	for _, gsi := range args.GSIs {
+		gsiKeySchema := []types.KeySchemaElement{
+			{
+				AttributeName: aws.String(gsi.PartitionKey),
+				KeyType:       types.KeyTypeHash,
+			},
+		}
+		if gsi.SortKey != "" {
+			gsiKeySchema = append(gsiKeySchema, types.KeySchemaElement{
+				AttributeName: aws.String(gsi.SortKey),
+				KeyType:       types.KeyTypeRange,
+			})
+		}
+
+		gsisList = append(gsisList, types.GlobalSecondaryIndex{
+			IndexName: aws.String(gsi.IndexName),
+			KeySchema: gsiKeySchema,
+			Projection: &types.Projection{
+				ProjectionType: types.ProjectionTypeAll,
+			},
+			ProvisionedThroughput: srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
+		})
+	}
+
+	return gsisList
+}
+
+func (srv *Server) getLsis(args *CreateTableArgs, hashKey string) []types.LocalSecondaryIndex {
+	var lsisList []types.LocalSecondaryIndex
+	for _, lsi := range args.LSIs {
+		lsiKeySchema := []types.KeySchemaElement{
+			{
+				AttributeName: aws.String(hashKey),
+				KeyType:       types.KeyTypeHash,
+			},
+			{
+				AttributeName: aws.String(lsi.SortKey),
+				KeyType:       types.KeyTypeRange,
+			},
+		}
+
+		lsisList = append(lsisList, types.LocalSecondaryIndex{
+			IndexName: aws.String(lsi.IndexName),
+			KeySchema: lsiKeySchema,
+			Projection: &types.Projection{
+				ProjectionType: types.ProjectionTypeAll,
+			},
+		})
+	}
+
+	return lsisList
+}
+
+func (srv *Server) getAttributeDefinitions(adList []types.AttributeDefinition) []string {
+	var attributeDefinitions []string
+	for _, ad := range adList {
+		attributeDefinitions = append(attributeDefinitions, fmt.Sprintf("%s (%s)", *ad.AttributeName, ad.AttributeType))
+	}
+	return attributeDefinitions
 }

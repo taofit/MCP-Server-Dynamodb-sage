@@ -81,6 +81,7 @@ type CreateTableArgs struct {
 	AttributeDefinitions []AttributeDefinition `json:"attributeDefinitions"`
 	BillingMode          string                `json:"billingMode"`
 	GSIs                 []GSI                 `json:"gsis"`
+	LSIs                 []LSI                 `json:"lsis"`
 	ReadCapacityUnits    int64                 `json:"readCapacityUnits,omitempty"`
 	WriteCapacityUnits   int64                 `json:"writeCapacityUnits,omitempty"`
 }
@@ -89,6 +90,11 @@ type GSI struct {
 	IndexName    string `json:"indexName"`
 	PartitionKey string `json:"partitionKey"`
 	SortKey      string `json:"sortKey"`
+}
+
+type LSI struct {
+	IndexName string `json:"indexName"`
+	SortKey   string `json:"sortKey"`
 }
 
 type KeySchema struct {
