@@ -56,7 +56,7 @@ func (srv *Server) addTools() {
 				"limit": map[string]any{
 					"type":        "integer",
 					"description": "The maximum number of items to return",
-					"default": 	   defaultLimit,
+					"default":     defaultLimit,
 				},
 				"exclusiveStartKey": map[string]any{
 					"type":        "object",
@@ -321,7 +321,7 @@ func (srv *Server) addTools() {
 							"keyType": map[string]any{
 								"type":        "string",
 								"description": "The type of the key",
-								"enum": []string{string(types.KeyTypeHash), string(types.KeyTypeRange)},
+								"enum":        []string{string(types.KeyTypeHash), string(types.KeyTypeRange)},
 							},
 						},
 						"required": []string{"attributeName", "keyType"},
@@ -349,11 +349,11 @@ func (srv *Server) addTools() {
 				"billingMode": map[string]any{
 					"type":        "string",
 					"description": "The billing mode for the table",
-					"enum": []string{string(types.BillingModePayPerRequest), string(types.BillingModeProvisioned)},
+					"enum":        []string{string(types.BillingModePayPerRequest), string(types.BillingModeProvisioned)},
 					"default":     string(types.BillingModePayPerRequest),
 				},
 				"gsis": map[string]any{
-					"type": "array",
+					"type":        "array",
 					"description": "The global secondary indexes for the table",
 					"items": map[string]any{
 						"type": "object",
@@ -385,7 +385,7 @@ func (srv *Server) addTools() {
 					},
 				},
 				"lsis": map[string]any{
-					"type": "array",
+					"type":        "array",
 					"description": "The local secondary indexes for the table",
 					"items": map[string]any{
 						"type": "object",
@@ -408,7 +408,7 @@ func (srv *Server) addTools() {
 	}, srv.createOptimizedTable)
 
 	mcp.AddTool(srv.s, &mcp.Tool{
-		Name: "delete_table",
+		Name:        "delete_table",
 		Description: "Delete a table",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -421,4 +421,123 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName"},
 		},
 	}, srv.deleteTable)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "update_table",
+		Description: "Update a table's provisioned throughput, billing mode, or global secondary indexes",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to update",
+				},
+				"provisionedThroughput": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"readCapacity": map[string]any{
+							"type":        "integer",
+							"description": "The read capacity units for the table",
+							"minimum":     1,
+						},
+						"writeCapacity": map[string]any{
+							"type":        "integer",
+							"description": "The write capacity units for the table",
+							"minimum":     1,
+						},
+					},
+					"required": []string{"readCapacity", "writeCapacity"},
+				},
+				"billingMode": map[string]any{
+					"type":        "string",
+					"description": "The billing mode for the table",
+					"enum":        []string{string(types.BillingModePayPerRequest), string(types.BillingModeProvisioned)},
+					"default":     string(types.BillingModePayPerRequest),
+				},
+				"attributeDefinitions": map[string]any{
+					"type":        "array",
+					"description": "The attributes needed for new global secondary indexes",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"attributeName": map[string]any{
+								"type":        "string",
+								"description": "The name of the attribute",
+							},
+							"attributeType": map[string]any{
+								"type":        "string",
+								"description": "The type of the attribute",
+								"enum":        []string{string(types.ScalarAttributeTypeS), string(types.ScalarAttributeTypeN), string(types.ScalarAttributeTypeB)},
+							},
+						},
+						"required": []string{"attributeName", "attributeType"},
+					},
+				},
+				"globalSecondaryIndexUpdates": map[string]any{
+					"type":        "array",
+					"description": "List of global secondary index updates. Each object must have exactly one of 'Create', 'Update', or 'Delete'.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"Create": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"IndexName": map[string]any{"type": "string"},
+									"KeySchema": map[string]any{
+										"type": "array",
+										"items": map[string]any{
+											"type": "object",
+											"properties": map[string]any{
+												"AttributeName": map[string]any{"type": "string"},
+												"KeyType":       map[string]any{"type": "string", "enum": []string{"HASH", "RANGE"}},
+											},
+											"required": []string{"AttributeName", "KeyType"},
+										},
+									},
+									"Projection": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"ProjectionType": map[string]any{"type": "string", "enum": []string{"ALL", "KEYS_ONLY", "INCLUDE"}},
+										},
+										"required": []string{"ProjectionType"},
+									},
+									"ProvisionedThroughput": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"ReadCapacityUnits":  map[string]any{"type": "integer"},
+											"WriteCapacityUnits": map[string]any{"type": "integer"},
+										},
+									},
+								},
+								"required": []string{"IndexName", "KeySchema", "Projection", "ProvisionedThroughput"},
+							},
+							"Update": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"IndexName": map[string]any{"type": "string"},
+									"ProvisionedThroughput": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"ReadCapacityUnits":  map[string]any{"type": "integer"},
+											"WriteCapacityUnits": map[string]any{"type": "integer"},
+										},
+										"required": []string{"ReadCapacityUnits", "WriteCapacityUnits"},
+									},
+								},
+								"required": []string{"IndexName", "ProvisionedThroughput"},
+							},
+							"Delete": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"IndexName": map[string]any{"type": "string"},
+								},
+								"required": []string{"IndexName"},
+							},
+						},
+					},
+				},
+			},
+			"required": []string{"tableName"},
+		},
+	}, srv.updateTable)
 }

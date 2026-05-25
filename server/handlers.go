@@ -734,6 +734,67 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 	return srv.successResult(fmt.Sprintf("Successfully created table \"%s\"\n Attribute definitions: %s", args.TableName, strings.Join(attributeDefinitions, ", "))), nil, nil
 }
 
+func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, args *UpdateTableArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("UpdateTable: %v", err)), nil, nil
+	}
+
+	input := &dynamodb.UpdateTableInput{
+		TableName: aws.String(args.TableName),
+	}
+
+	if args.BillingMode != "" {
+		input.BillingMode = types.BillingMode(args.BillingMode)
+	}
+
+	if args.ProvisionedThroughput != nil && (args.ProvisionedThroughput.WriteCapacityUnits > 0 || args.ProvisionedThroughput.ReadCapacityUnits > 0 || args.BillingMode == string(types.BillingModeProvisioned)) {
+		ru := args.ProvisionedThroughput.ReadCapacityUnits
+		if ru == 0 {
+			ru = 1
+		}
+		wu := args.ProvisionedThroughput.WriteCapacityUnits
+		if wu == 0 {
+			wu = 1
+		}
+		input.ProvisionedThroughput = &types.ProvisionedThroughput{
+			ReadCapacityUnits:  aws.Int64(ru),
+			WriteCapacityUnits: aws.Int64(wu),
+		}
+	}
+    if len(args.GlobalSecondaryIndexUpdates) > 0 {
+        // Filter out empty update structs where all actions are nil
+        var realUpdates []types.GlobalSecondaryIndexUpdate
+        for _, upd := range args.GlobalSecondaryIndexUpdates {
+            if upd.Create != nil || upd.Update != nil || upd.Delete != nil {
+                realUpdates = append(realUpdates, upd)
+            }
+        }
+        if len(realUpdates) > 0 {
+            input.GlobalSecondaryIndexUpdates = realUpdates
+        }
+    }
+
+	if len(args.AttributeDefinitions) > 0 {
+		var attriList []types.AttributeDefinition
+		for _, attr := range args.AttributeDefinitions {
+			attriList = append(attriList, types.AttributeDefinition{
+				AttributeName: aws.String(attr.AttributeName),
+				AttributeType: types.ScalarAttributeType(attr.AttributeType),
+			})
+		}
+		input.AttributeDefinitions = attriList
+	}
+
+	output, err := srv.db.UpdateTable(ctx, input)
+	if err != nil {
+		srv.sendAuditLog("update_table", args.TableName, "", nil, err)
+		return srv.errorResult(fmt.Sprintf("UpdateTable %s failed: %v", args.TableName, err)), nil, nil
+	}
+	srv.sendAuditLog("update_table", args.TableName, "", nil, nil)
+
+	return srv.successResult(fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v", args.TableName, output.TableDescription.TableStatus)), nil, nil
+}
+
 func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, args *DeleteTableArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
 		return srv.errorResult(fmt.Sprintf("DeleteTable: %v", err)), nil, nil

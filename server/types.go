@@ -1,5 +1,7 @@
 package server
 
+import "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 type ListTablesArgs struct {
 }
 
@@ -86,6 +88,14 @@ type CreateTableArgs struct {
 	WriteCapacityUnits   int64                 `json:"writeCapacityUnits,omitempty"`
 }
 
+type UpdateTableArgs struct {
+	TableName                   string                             `json:"tableName"`
+	GlobalSecondaryIndexUpdates []types.GlobalSecondaryIndexUpdate `json:"globalSecondaryIndexUpdates"`
+	BillingMode                 string                             `json:"billingMode"`
+	ProvisionedThroughput       *ProvisionedThroughput             `json:"provisionedThroughput,omitempty"`
+	AttributeDefinitions        []AttributeDefinition              `json:"attributeDefinitions,omitempty"`
+}
+
 type GSI struct {
 	IndexName    string `json:"indexName"`
 	PartitionKey string `json:"partitionKey"`
@@ -100,6 +110,11 @@ type LSI struct {
 type KeySchema struct {
 	AttributeName string `json:"attributeName"`
 	KeyType       string `json:"keyType"`
+}
+
+type ProvisionedThroughput struct {
+	ReadCapacityUnits  int64 `json:"readCapacityUnits"`
+	WriteCapacityUnits int64 `json:"writeCapacityUnits"`
 }
 
 type AttributeDefinition struct {
