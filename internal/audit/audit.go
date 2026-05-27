@@ -9,14 +9,14 @@ import (
 )
 
 type AuditEntry struct {
-	Timestamp    time.Time `json:"timestamp"`
-	Operation    string    `json:"operation"`
-	TableName    string    `json:"table_name"`
-	User         string    `json:"user"`
+	Timestamp             time.Time `json:"timestamp"`
+	Operation             string    `json:"operation"`
+	TableName             string    `json:"table_name"`
+	User                  string    `json:"user"`
 	CapacityUnitsConsumed float64   `json:"capacity_units_consumed"`
-	CapacityType string 	`json:"capacity_type"`
-	Status       string    `json:"status"`
-	Message      string    `json:"message,omitempty"`
+	CapacityType          string    `json:"capacity_type"`
+	Status                string    `json:"status"`
+	Message               string    `json:"message,omitempty"`
 }
 
 type AuditLog struct {
@@ -32,7 +32,7 @@ func NewAuditLog(dbPath string) (*AuditLog, error) {
 
 	query := `CREATE TABLE IF NOT EXISTS audit_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		timestamp DATETIME NOT NULL,
+		timestamp INTEGER NOT NULL,
 		operation TEXT NOT NULL,
 		table_name TEXT,
 		user TEXT NOT NULL,
@@ -46,7 +46,7 @@ func NewAuditLog(dbPath string) (*AuditLog, error) {
 	}
 
 	auditLog := &AuditLog{
-		db: db,
+		db:        db,
 		auditChan: make(chan AuditEntry, 100),
 	}
 	auditLog.processQueue()
@@ -64,18 +64,23 @@ func (a *AuditLog) processQueue() {
 
 func (a *AuditLog) ReadAuditHistory(limit int32, startTime time.Time, endTime time.Time) ([]AuditEntry, error) {
 	query := `SELECT timestamp, operation, table_name, user, capacity_units_consumed, capacity_type, status, message FROM audit_logs WHERE timestamp BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT ?`
-	rows, err := a.db.Query(query, startTime, endTime, limit)
+	rows, err := a.db.Query(query, startTime.Unix(), endTime.Unix(), limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var entries []AuditEntry
 	for rows.Next() {
+		var tsUnix int64
 		entry := AuditEntry{}
-		if err := rows.Scan(&entry.Timestamp, &entry.Operation, &entry.TableName, &entry.User, &entry.CapacityUnitsConsumed, &entry.CapacityType, &entry.Status, &entry.Message); err != nil {
+		if err := rows.Scan(&tsUnix, &entry.Operation, &entry.TableName, &entry.User, &entry.CapacityUnitsConsumed, &entry.CapacityType, &entry.Status, &entry.Message); err != nil {
 			return nil, err
 		}
+		entry.Timestamp = time.Unix(tsUnix, 0)
 		entries = append(entries, entry)
+	}
+	if entries == nil {
+		entries = []AuditEntry{}
 	}
 	return entries, nil
 }
@@ -90,7 +95,7 @@ func (a *AuditLog) LogActivity(entry AuditEntry) {
 
 func (a *AuditLog) saveAuditHistory(entry AuditEntry) {
 	_, err := a.db.Exec(`INSERT INTO audit_logs (timestamp, operation, table_name, user, capacity_units_consumed, capacity_type, status, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.Timestamp,
+		entry.Timestamp.Unix(),
 		entry.Operation,
 		entry.TableName,
 		entry.User,
@@ -98,7 +103,7 @@ func (a *AuditLog) saveAuditHistory(entry AuditEntry) {
 		entry.CapacityType,
 		entry.Status,
 		entry.Message)
-	
+
 	if err != nil {
 		log.Printf("failed to save audit entry: %v", err)
 	}

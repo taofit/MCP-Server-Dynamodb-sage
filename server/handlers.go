@@ -35,7 +35,7 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 	}
 	limit, warning := srv.guardrail.EnforceLimit(args.Limit)
 
-	output, err := srv.db.Query(ctx, &dynamodb.QueryInput{
+	qi := &dynamodb.QueryInput{
 		TableName:                 &args.TableName,
 		KeyConditionExpression:    &args.KeyConditionExpression,
 		ExpressionAttributeNames:  args.ExpressionAttributeNames,
@@ -43,7 +43,12 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 		Limit:                     &limit,
 		ExclusiveStartKey:         startKey,
 		ReturnConsumedCapacity:    types.ReturnConsumedCapacityTotal,
-	})
+	}
+	if args.IndexName != "" {
+		qi.IndexName = &args.IndexName
+	}
+
+	output, err := srv.db.Query(ctx, qi)
 
 	if err != nil {
 		var cc *types.ConsumedCapacity
@@ -671,6 +676,19 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 
 func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRequest, args *CreateTableArgs) (*mcp.CallToolResult, any, error) {
 	keySchema, hashKey := srv.getKeySchema(args.KeySchema)
+
+	if len(args.LSIs) > 0 {
+		hasRangeKey := false
+		for _, k := range args.KeySchema {
+			if k.KeyType == string(types.KeyTypeRange) {
+				hasRangeKey = true
+				break
+			}
+		}
+		if !hasRangeKey {
+			return srv.errorResult("LSI requires a composite primary key (HASH + RANGE). Add a sort key (keyType: \"RANGE\") to keySchema when using LSIs."), nil, nil
+		}
+	}
 
 	providedAttributeTypes := make(map[string]types.ScalarAttributeType)
 	for _, ad := range args.AttributeDefinitions {

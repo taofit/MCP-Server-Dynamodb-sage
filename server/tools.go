@@ -1,8 +1,6 @@
 package server
 
 import (
-	"time"
-
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -95,6 +93,10 @@ func (srv *Server) addTools() {
 				"tableName": map[string]any{
 					"type":        "string",
 					"description": "The name of the table to query",
+				},
+				"indexName": map[string]any{
+					"type":        "string",
+					"description": "Optional: The name of an LSI or GSI to query against. Omit to query the base table.",
 				},
 				"keyConditionExpression": map[string]any{
 					"type":        "string",
@@ -274,19 +276,17 @@ func (srv *Server) addTools() {
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "read_audit_logs",
-		Description: "Read audit logs from sqlite database",
+		Description: "Read the audit log showing all DynamoDB operations that have been run recently (creates, puts, queries, deletes, etc.) including timestamp, user, table name, and capacity consumed.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"startTime": map[string]any{
 					"type":        "string",
-					"description": "The start time for the audit logs in RFC3339 format. Default is 7 days ago.",
-					"default":     time.Now().AddDate(0, 0, -7).Format(time.RFC3339),
+					"description": "The start time for the audit logs in RFC3339 format (e.g. \"2026-05-27T00:00:00Z\", \"2026-05-26T15:30:00Z\"). Default is epoch (1970-01-01T00:00:00Z).",
 				},
 				"endTime": map[string]any{
 					"type":        "string",
-					"description": "The end time for the audit logs in RFC3339 format. Default is now.",
-					"default":     time.Now().Format(time.RFC3339),
+					"description": "The end time for the audit logs in RFC3339 format (e.g. \"2026-05-27T12:00:00Z\", \"2026-05-26T18:00:00Z\"). Default is now (current time).",
 				},
 				"limit": map[string]any{
 					"type":        "integer",

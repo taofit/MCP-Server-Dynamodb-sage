@@ -29,6 +29,7 @@ type PutItemArgs struct {
 
 type QueryTableArgs struct {
 	TableName                 string            `json:"tableName"`
+	IndexName                 string            `json:"indexName"`
 	KeyConditionExpression    string            `json:"keyConditionExpression"`
 	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames"`
 	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues"`
