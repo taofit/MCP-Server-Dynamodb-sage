@@ -2,34 +2,108 @@ package main
 
 import (
 	"context"
-	"dynamodb-sage/server"
 	"log"
-	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"dynamodb-sage/server"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	ctx := context.Background()
-	// Configure AWS SDK for LocalStack, for actual AWS, remove WithBaseEndpoint and WithCredentialsProvider, keep ctx only
-	cfg, err := config.LoadDefaultConfig(ctx,
-		config.WithRegion("eu-north-1"),
-		config.WithBaseEndpoint("http://localhost:4566"),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
-	)
-	if err != nil {
-		log.Fatalf("AWS SDK configuration failed: %v", err)
+	if err := godotenv.Load(".env"); err != nil {
+		log.Printf("warning: failed to load .env file: %v", err)
 	}
+
+	endpoint := os.Getenv("AWS_BASE_ENDPOINT")
+	akid := os.Getenv("AWS_ACCESS_KEY_ID")
+	sak := os.Getenv("AWS_SECRET_ACCESS_KEY")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	optFns := []func(*config.LoadOptions) error{}
+	if endpoint != "" {
+		log.Printf("Development mode: routing AWS traffic to Localstack endpoint: %s", endpoint)
+		if akid == "" || sak == "" {
+			akid, sak = "test", "test"
+		}
+		optFns = append(optFns, config.WithBaseEndpoint(endpoint))
+		optFns = append(optFns, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(akid, sak, "")))
+	} else {
+		log.Println("Production mode: using default credential chain (IAM roles, env vars, ~/.aws/credentials)")
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, optFns...)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	// Resolve caller identity for audit logging via AWS STS.
+	userID := "unknown"
+	userARN := "unknown"
+	stsClient := sts.NewFromConfig(cfg)
+	caller, err := stsClient.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+	if err == nil {
+		userID = *caller.UserId
+		userARN = *caller.Arn
+		// Extract friendly name from ARN
+		//   arn:aws:iam::account:user/name      → name
+		//   arn:aws:sts::account:assumed-role/n  → n
+		//   arn:aws:iam::account:root            → root
+		if s := strings.SplitN(userARN, "/", 2); len(s) > 1 {
+			userID = s[1]
+		} else if s := strings.Split(userARN, ":"); len(s) > 0 {
+			userID = s[len(s)-1]
+		}
+	} else {
+		log.Printf("warning: failed to get caller identity: %v", err)
+		if endpoint == "" {
+			userID = akid
+		}
+	}
+
+	log.Printf("Authenticated Principal: %s (Context Identifier: %s)", userID, userARN)
+
+	dbPath := "data/audit.db"
+	if v := os.Getenv("DYNAMO_SAGE_DB"); v != "" {
+		dbPath = v
+	}
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		log.Fatalf("failed to create data directory for %s: %v", dbDir, err)
+	}
+
+	configPath := "config.yaml"
+	if v := os.Getenv("CONFIG_PATH"); v != "" {
+		configPath = v
+	}
+
 	db := dynamodb.NewFromConfig(cfg)
+	srv := server.New(db, userID, userARN, configPath, dbPath)
 
-	srv := server.New(db)
+	transportMode := os.Getenv("MCP_TRANSPORT_MODE")
+	if transportMode == "" {
+		transportMode = "stdio"
+	}
 
-	port := ":3001"
-	http.Handle("/sse", srv.SSEHandler())
-	log.Printf("Server started on SSE (port %s)\n", port)
-	if err := http.ListenAndServe(port, nil); err != nil {
-		log.Fatalf("HTTP server failed: %v", err)
+	switch transportMode {
+	case "stdio":
+		if err := srv.ServeStdio(); err != nil {
+			log.Fatalf("failed to serve dynamo-sage MCP server on standard IO: %v", err)
+		}
+	case "sse":
+		if err := srv.ServeHTTP(":8080"); err != nil {
+			log.Fatalf("failed to serve dynamo-sage MCP server on HTTP: %v", err)
+		}
+	default:
+		log.Fatalf("invalid MCP transport mode: %s", transportMode)
 	}
 }

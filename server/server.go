@@ -2,42 +2,54 @@ package server
 
 import (
 	"context"
-	"fmt"
+	"dynamodb-sage/internal/audit"
+	"dynamodb-sage/internal/engine"
+	"log"
 	"net/http"
-	"strings"
+	"net/http/httptest"
+	"os"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type Server struct {
-	db *dynamodb.Client
-	s  *mcp.Server
+	db        *dynamodb.Client
+	s         *mcp.Server
+	guardrail *engine.Guardrail
+	auditLog  *audit.AuditLog
+	userID    string
+	userARN   string
 }
 
-type ListTablesArgs struct {
+type AuditBackend interface {
+	LogActivity(entry audit.AuditEntry)
 }
 
-type DescribeTableArgs struct {
-	TableName string `json:"tableName"`
-}
-
-type ScanTableArgs struct {
-	TableName string `json:"tableName"`
-}
-
-func New(db *dynamodb.Client) *Server {
-
-	s := mcp.NewServer(&mcp.Implementation{
+func New(db *dynamodb.Client, userID, userARN, configPath, dbPath string) *Server {
+	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "dynamo-sage",
 		Version: "1.0.0",
 	}, nil)
 
-	srv := &Server{
-		db: db,
-		s:  s,
+	config, err := engine.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
 	}
-	addTools(s, srv)
+	guardrail := engine.NewGuardrail(*config)
+	auditLog, err := audit.NewAuditLog(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to create audit log: %v", err)
+	}
+	srv := &Server{
+		db:        db,
+		auditLog:  auditLog,
+		s:         mcpServer,
+		guardrail: guardrail,
+		userID:    userID,
+		userARN:   userARN,
+	}
+	srv.addTools()
 
 	return srv
 }
@@ -47,146 +59,90 @@ func (srv *Server) SSEHandler() http.Handler {
 		return srv.s
 	}, nil)
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set up a single route with CORS support for the inspector
-		// Allow the MCP Inspector (or any origin) to connect
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	streamableHandler := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
+		return srv.s
+	}, &mcp.StreamableHTTPOptions{
+		JSONResponse: true,
+		Stateless:    true,
+	})
 
-		// Handle preflight requests
-		if r.Method == "OPTIONS" {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, MCP-Protocol-Version")
+		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
+
+		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
-		sseHandler.ServeHTTP(w, r)
+		if r.URL.Path == "/health" {
+			srv.HealthHandler(w, r)
+			return
+		}
+
+		sessionIDQuery := r.URL.Query().Get("sessionid")
+		sessionIDHeader := r.Header.Get("Mcp-Session-Id")
+
+		switch r.Method {
+		case http.MethodGet:
+			sseHandler.ServeHTTP(w, r)
+		case http.MethodPost:
+			if sessionIDQuery != "" && sessionIDHeader != "" {
+				http.Error(w, "sessionid and Mcp-Session-Id are both present", http.StatusBadRequest)
+				return
+			}
+			if sessionIDHeader != "" {
+				q := r.URL.Query()
+				q.Set("sessionid", sessionIDHeader)
+				r.URL.RawQuery = q.Encode()
+			}
+			if sessionIDQuery != "" || sessionIDHeader != "" {
+				rec := httptest.NewRecorder()
+				sseHandler.ServeHTTP(rec, r)
+				if rec.Code == http.StatusAccepted && rec.Body.Len() == 0 {
+					for k, v := range rec.Header() {
+						w.Header()[k] = append([]string(nil), v...)
+					}
+					w.WriteHeader(rec.Code)
+					return
+				}
+				if rec.Code == http.StatusNotFound {
+					streamableHandler.ServeHTTP(w, r)
+					return
+				}
+				for k, v := range rec.Header() {
+					w.Header()[k] = append([]string(nil), v...)
+				}
+				w.WriteHeader(rec.Code)
+				rec.Body.WriteTo(w)
+				return
+			}
+			streamableHandler.ServeHTTP(w, r)
+		default:
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		}
 	})
 }
 
-func addTools(s *mcp.Server, srv *Server) {
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "list_tables",
-		Description: "List all DynamoDB tables",
-		InputSchema: map[string]any{
-			"type": "object",
-		},
-	}, srv.listTables)
-
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "describe_table",
-		Description: "Get details about a DynamoDB table schema, indexes, and status",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"tableName": map[string]any{
-					"type":        "string",
-					"description": "The name of the table to describe",
-				},
-			},
-			"required": []string{"tableName"},
-		},
-	}, srv.describeTable)
-
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "scan_table",
-		Description: "Read items from a DynamoDB table (returns up to 20 items)",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"tableName": map[string]any{
-					"type":        "string",
-					"description": "The name of the table to scan",
-				},
-			},
-			"required": []string{"tableName"},
-		},
-	}, srv.scanTable)
+func (srv *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
 }
 
-func (srv *Server) listTables(ctx context.Context, req *mcp.CallToolRequest, args *ListTablesArgs) (*mcp.CallToolResult, any, error) {
-	out, err := srv.db.ListTables(ctx, &dynamodb.ListTablesInput{})
-	if err != nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{
-					Text: fmt.Sprintf("Error when listing tables: %v", err),
-				},
-			},
-			IsError: true,
-		}, nil, nil
-	}
-
-	tables := strings.Join(out.TableNames, ", ")
-	if tables == "" {
-		tables = "(no tables found)"
-	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{
-				Text: fmt.Sprintf("DynamoDB Tables: %s", tables),
-			},
-		},
-	}, nil, nil
-}
-func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, args *DescribeTableArgs) (*mcp.CallToolResult, any, error) {
-	out, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-		TableName: &args.TableName,
-	})
-	if err != nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{
-					Text: fmt.Sprintf("Error when describing table %s: %v", args.TableName, err),
-				},
-			},
-			IsError: true,
-		}, nil, nil
-	}
-
-	// Format the output in a readable way
-	details := fmt.Sprintf("Table: %s\nStatus: %s\nItem Count: %d\nSize (Bytes): %d\n",
-		*out.Table.TableName, out.Table.TableStatus, out.Table.ItemCount, out.Table.TableSizeBytes)
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{
-				Text: details,
-			},
-		},
-	}, nil, nil
+func (srv *Server) ServeStdio() error {
+	return srv.s.Run(context.Background(), &mcp.StdioTransport{})
 }
 
-func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args *ScanTableArgs) (*mcp.CallToolResult, any, error) {
-	// Limit scan to 20 items to avoid token overflow in the AI client
-	limit := int32(20)
-	out, err := srv.db.Scan(ctx, &dynamodb.ScanInput{
-		TableName: &args.TableName,
-		Limit:     &limit,
-	})
-	if err != nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{
-					Text: fmt.Sprintf("Error when scanning table %s: %v", args.TableName, err),
-				},
-			},
-			IsError: true,
-		}, nil, nil
+func (srv *Server) ServeHTTP(addr string) error {
+	if v := os.Getenv("DYNAMO_SAGE_ADDR"); v != "" {
+		addr = v
 	}
+	return http.ListenAndServe(addr, srv.SSEHandler())
+}
 
-	// For a simple text representation of the items
-	itemsText := fmt.Sprintf("Scanned %d items from table %s:\n", len(out.Items), args.TableName)
-	for i, item := range out.Items {
-		itemsText += fmt.Sprintf("[%d] %v\n", i+1, item)
-	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{
-				Text: itemsText,
-			},
-		},
-	}, nil, nil
+func (srv *Server) RecordActionLog(backend AuditBackend, entry audit.AuditEntry) {
+	backend.LogActivity(entry)
 }

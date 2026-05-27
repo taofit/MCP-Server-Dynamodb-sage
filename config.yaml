@@ -1,0 +1,39 @@
+version: "1.0"
+
+global_limits:
+  max_limit: 100
+  default_limit: 20
+
+sensitive_fields:
+  - password
+  - ssn
+  - token
+  - api_key
+  - secret
+  - card_number
+  - credit_card
+
+protected_tables:
+  - Transactions
+  - SystemConfig
+
+tables:
+  - name: "Users"
+    pii_fields: ["email", "phone_number"] ## they may be the same as sensitive_fields
+    read_only: false
+    enforce_schema: true
+    columns:
+      user_id: "S"
+      user_name: "S"
+      age: "N"
+      is_active: "BOOL"
+  
+  - name: "Orders"
+    pii_fields: ["customer_name", "shipping_address"]
+    read_only: false
+    enforce_schema: false
+    columns:
+      customer_id: "S"
+      customer_name: "S"
+      shipping_address: "S"
+    

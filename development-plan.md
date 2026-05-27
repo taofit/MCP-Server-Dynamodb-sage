@@ -95,7 +95,27 @@ MCP Client (Claude/Cursor/etc)
     - `internal/dx/cli.go` — standalone CLI tool for testing
     - `internal/dx/templates.go` — common operation templates
 
-14. Testing and reliability:
+14. Audit Log — SQLite-backed audit log exposed as an MCP tool:
+    - `internal/audit/logger.go` — `AuditLogger` struct with SQLite client, writes an entry after every handler call (internal write, never audited itself)
+    - `internal/audit/entry.go` — `AuditEntry` struct:
+      - `audit_id` — uuid (PK)
+      - `timestamp` — Unix ms
+      - `operation` — tool called (scan_table, query_table, put_item, etc.)
+      - `table_name` — which user table was accessed
+      - `item_count` — items returned/written
+      - `estimated_rcu` — from `EstimateRCU` for write ops, `ConsumedCapacity` for read ops
+      - `estimated_wcu` — from `EstimateWCU`
+      - `duration_ms` — execution time
+      - `success` — whether the operation succeeded
+    - `internal/audit/db.go` — SQLite setup, table creation on startup, insert and query helpers
+    - `AuditLogger` injected into `Server` struct, called at the end of every handler
+    - New MCP tool `get_audit_history`:
+      - Optional filters: `operation`, `tableName`, `from`, `to` (time range)
+      - Returns list of entries with RCU/WCU cost per operation
+      - Aggregates: total RCU/WCU consumed, most expensive operations, most accessed tables
+    - SQLite file (`audit.db`) stored alongside the binary — zero config, no extra services
+
+15. Testing and reliability:
     - `testing/integration_test.go` — real AWS integration tests
     - `testing/chaos.go` — chaos engineering for reliability testing
     - `testing/load_test.go` — performance testing framework
@@ -171,9 +191,16 @@ dynamo-sage/
 │   │   ├── slack.go               # Slack notifications
 │   │   └── datadog.go             # DataDog metrics export
 │   │
-│   └── dx/                        # (13) Developer experience
-│       ├── cli.go                 # standalone CLI tool
-│       └── templates.go           # common operation templates
+│   ├── dx/                        # (13) Developer experience
+│   │   ├── cli.go                 # standalone CLI tool
+│   │   └── templates.go           # common operation templates
+│   │
+│   ├── audit/                     # (14) Audit log
+│   │   ├── logger.go              # AuditLogger struct, writes after each handler
+│   │   ├── entry.go               # AuditEntry struct
+│   │   └── db.go                  # SQLite setup, insert and query helpers
+│
+├── audit.db                       # SQLite audit database (auto-created on startup)
 │
 ├── scripts/
 │   └── init-aws.sh                # LocalStack table + seed data setup
