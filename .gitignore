@@ -37,6 +37,11 @@ Thumbs.db
 # Ignore the local audit database
 .data/
 *.db
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+
 # Dependencies
 # (Uncomment if you use vendor directory)
 # vendor/
