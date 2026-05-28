@@ -21,6 +21,26 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+resource "aws_iam_role_policy" "ecs_task_execution_efs" {
+  name = "${var.project_name}-efs-mount"
+  role = aws_iam_role.ecs_task_execution.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticfilesystem:ClientMount",
+          "elasticfilesystem:ClientWrite",
+          "elasticfilesystem:ClientRootAccess",
+        ]
+        Resource = [aws_efs_file_system.app.arn]
+      }
+    ]
+  })
+}
+
 # ------------------------------------------------------------------------------
 # ECS Task Role (what the application uses — DynamoDB access)
 # ------------------------------------------------------------------------------
