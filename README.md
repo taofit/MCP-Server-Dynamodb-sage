@@ -1,6 +1,15 @@
 # dynamodb-sage
 
-An MCP (Model Context Protocol) server that acts as a DynamoDB gateway — enabling LLMs to perform safe, guarded operations on DynamoDB tables through natural language.
+**Security-first MCP gateway for DynamoDB** — LLMs interact with DynamoDB
+through a guardrail layer that enforces capacity limits, validates operations,
+and audits every action. Designed for safe multi-tenant AI access to production
+data.
+
+Key differentiators:
+- **Guardrails**: capacity caps, operation whitelists, query limits
+- **Audit trail**: every DynamoDB operation logged with principal, timestamp,
+  and throughput
+- **No direct SQL/NoSQL injection**: structured tool calls only
 
 [![Demo Video](https://img.youtube.com/vi/zt_6hMwcw2c/maxresdefault.jpg)](https://www.youtube.com/watch?v=zt_6hMwcw2c)
 

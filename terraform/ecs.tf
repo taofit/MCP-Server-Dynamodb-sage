@@ -133,7 +133,7 @@ resource "aws_lb_target_group" "app" {
   }
 
   stickiness {
-    type = "lb_cookie"
+    type    = "lb_cookie"
     enabled = true
   }
 
@@ -180,6 +180,18 @@ resource "aws_ecs_task_definition" "app" {
     cpu_architecture        = "X86_64"
   }
 
+  volume {
+    name = "audit-data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.app.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.app.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
   container_definitions = jsonencode([
     {
       name      = var.project_name
@@ -195,6 +207,18 @@ resource "aws_ecs_task_definition" "app" {
       ]
 
       environment = local.env_vars
+
+      linuxParameters = {
+        initProcessEnabled = true
+      }
+
+      mountPoints = [
+        {
+          sourceVolume  = "audit-data"
+          containerPath = "/app/data"
+          readOnly      = false
+        }
+      ]
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -227,8 +251,8 @@ resource "aws_ecs_service" "app" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets         = aws_subnet.public[*].id
-    security_groups = [aws_security_group.ecs_tasks.id]
+    subnets          = aws_subnet.public[*].id
+    security_groups  = [aws_security_group.ecs_tasks.id]
     assign_public_ip = true
   }
 

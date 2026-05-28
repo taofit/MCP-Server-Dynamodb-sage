@@ -18,9 +18,14 @@ output "alb_dns_name" {
   value       = aws_lb.app.dns_name
 }
 
+output "efs_file_system_id" {
+  description = "EFS file system ID for persistent audit storage"
+  value       = aws_efs_file_system.app.id
+}
+
 output "docker_push_commands" {
   description = "Commands to build and push the Docker image to ECR and force ECS redeploy"
-  value = <<-EOT
+  value       = <<-EOT
 # Authenticate Docker to ECR
 aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${aws_ecr_repository.app.repository_url}
 

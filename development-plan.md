@@ -55,71 +55,38 @@ MCP Client (Claude/Cursor/etc)
 
 5. Confirmation flow — return a warning tool response asking user to confirm before proceeding with risky ops
 
-6. Safety features:
-   - `internal/safety/circuit_breaker.go` — stop operations if error rate too high
-   - `internal/safety/rate_limiter.go` — prevent DynamoDB throttling
-   - `internal/safety/rollback.go` — automatic rollback for batch operations
-   - `internal/safety/dry_run.go` — simulate operations without executing
+6. Audit Log — SQLite-backed audit log exposed as an MCP tool (done):
+   - `internal/audit/` — logger, entry model, SQLite queries
+   - MCP tool `read_audit_logs` with time range + limit filters
 
-7. Smart caching layer:
-   - `internal/cache/table_metadata.go` — cache DescribeTable responses (expensive calls)
-   - `internal/cache/cost_estimates.go` — cache cost calculations for similar queries
-   - `internal/cache/invalidation.go` — smart cache invalidation strategies
+7. Multi-tenant isolation — per-team API keys, separate audit logs, table namespacing:
+   - `internal/auth/apikeys.go` — API key generation and validation
+   - `internal/auth/tenant.go` — tenant context extraction from request
+   - `config/provisioning.go` — per-tenant guardrails and table prefix
 
-8. Advanced cost modeling:
-   - `internal/cost/historical.go` — learn from past operation costs
-   - `internal/cost/optimization.go` — suggest query optimizations to reduce cost
-   - `internal/cost/billing.go` — integration with AWS Cost Explorer API
+8. Admin dashboard — simple web UI for configuration:
+   - View audit logs with filters
+   - Manage API keys per tenant
+   - Configure guardrails (throttles, budgets, allowlists)
+   - Usage stats (calls, capacity, costs per tenant)
 
-9. Security and compliance:
-   - `internal/security/encryption.go` — ensure encryption at rest/transit
-   - `internal/security/audit_trail.go` — detailed audit logs for compliance
-   - `internal/security/pii_detection.go` — detect and warn about PII in operations
-   - `internal/security/access_control.go` — role-based access control integration
+9. Docker Compose one-liner — `docker compose up` for self-hosting:
+   - `docker-compose.yml` with server + optional dashboard
+   - Health checks, volume mounts for persistence
 
-10. Metrics and observability:
-    - `internal/metrics/collector.go` — Prometheus metrics for operations, costs, warnings
-    - `internal/metrics/cloudwatch.go` — CloudWatch dashboard + custom metrics
-    - `internal/metrics/alerts.go` — alert rules for high-cost operations
+10. Usage-based billing hooks — track per-tenant consumption for monetization:
+    - `internal/billing/meter.go` — count tool calls, RCU/WCU, tokens per tenant
+    - Stripe or AWS Marketplace metering API integration
+    - Exportable usage reports for invoice generation
 
-11. Advanced DynamoDB features:
-    - `internal/advanced/streams.go` — DynamoDB Streams integration
-    - `internal/advanced/backup.go` — automated backup before destructive operations
-    - `internal/advanced/capacity.go` — auto-scaling recommendations
+11. REST API wrapper — expose MCP tools as REST endpoints for non-MCP clients:
+    - `POST /tools/{toolName}` — call a tool programmatically
+    - `GET /health` — already done
+    - `GET /tools` — list available tools
 
-12. Integration ecosystem:
-    - `internal/integrations/slack.go` — Slack notifications for high-risk operations
-    - `internal/integrations/datadog.go` — send metrics to DataDog
-
-13. Developer experience:
-    - `internal/dx/cli.go` — standalone CLI tool for testing
-    - `internal/dx/templates.go` — common operation templates
-
-14. Audit Log — SQLite-backed audit log exposed as an MCP tool:
-    - `internal/audit/logger.go` — `AuditLogger` struct with SQLite client, writes an entry after every handler call (internal write, never audited itself)
-    - `internal/audit/entry.go` — `AuditEntry` struct:
-      - `audit_id` — uuid (PK)
-      - `timestamp` — Unix ms
-      - `operation` — tool called (scan_table, query_table, put_item, etc.)
-      - `table_name` — which user table was accessed
-      - `item_count` — items returned/written
-      - `estimated_rcu` — from `EstimateRCU` for write ops, `ConsumedCapacity` for read ops
-      - `estimated_wcu` — from `EstimateWCU`
-      - `duration_ms` — execution time
-      - `success` — whether the operation succeeded
-    - `internal/audit/db.go` — SQLite setup, table creation on startup, insert and query helpers
-    - `AuditLogger` injected into `Server` struct, called at the end of every handler
-    - New MCP tool `get_audit_history`:
-      - Optional filters: `operation`, `tableName`, `from`, `to` (time range)
-      - Returns list of entries with RCU/WCU cost per operation
-      - Aggregates: total RCU/WCU consumed, most expensive operations, most accessed tables
-    - SQLite file (`audit.db`) stored alongside the binary — zero config, no extra services
-
-15. Testing and reliability:
+11. Testing:
     - `testing/integration_test.go` — real AWS integration tests
-    - `testing/chaos.go` — chaos engineering for reliability testing
-    - `testing/load_test.go` — performance testing framework
-    - `testing/mocks.go` — comprehensive mocking for unit tests
+    - `testing/mocks.go` — unit test mocks
 
 **Tech stack recommendation (Go, since your workspace is Go):**
 
@@ -154,61 +121,29 @@ dynamo-sage/
 │   │   ├── harm.go                # destructive op detection
 │   │   └── confirm.go             # (5) confirmation flow — warning + user prompt
 │   │
-│   ├── cost/                      # (3)(8) Cost estimation + advanced modeling
-│   │   ├── estimator.go           # RCU/WCU cost estimation
-│   │   ├── historical.go          # learn from past operation costs
-│   │   ├── optimization.go        # suggest query optimizations
-│   │   └── billing.go             # AWS Cost Explorer API integration
+│   ├── cost/                      # (3) Cost estimation
+│   │   └── estimator.go           # RCU/WCU cost estimation
 │   │
-│   ├── safety/                    # (6) Safety features
-│   │   ├── circuit_breaker.go     # halt on high error rate
-│   │   ├── rate_limiter.go        # prevent DynamoDB throttling
-│   │   ├── rollback.go            # automatic rollback for batch ops
-│   │   └── dry_run.go             # simulate without executing
-│   │
-│   ├── cache/                     # (7) Smart caching
-│   │   ├── table_metadata.go      # cache DescribeTable responses
-│   │   ├── cost_estimates.go      # cache cost calculations
-│   │   └── invalidation.go        # cache invalidation strategies
-│   │
-│   ├── security/                  # (9) Security and compliance
-│   │   ├── encryption.go          # encryption at rest/transit checks
-│   │   ├── audit_trail.go         # detailed audit logs
-│   │   ├── pii_detection.go       # detect PII in operations
-│   │   └── access_control.go      # RBAC integration
-│   │
-│   ├── metrics/                   # (10) Observability
-│   │   ├── collector.go           # Prometheus metrics
-│   │   ├── cloudwatch.go          # CloudWatch dashboard + custom metrics
-│   │   └── alerts.go              # alert rules for high-cost ops
-│   │
-│   ├── advanced/                  # (11) Advanced DynamoDB features
-│   │   ├── streams.go             # DynamoDB Streams integration
-│   │   ├── backup.go              # auto-backup before destructive ops
-│   │   └── capacity.go            # auto-scaling recommendations
-│   │
-│   ├── integrations/              # (12) External integrations
-│   │   ├── slack.go               # Slack notifications
-│   │   └── datadog.go             # DataDog metrics export
-│   │
-│   ├── dx/                        # (13) Developer experience
-│   │   ├── cli.go                 # standalone CLI tool
-│   │   └── templates.go           # common operation templates
-│   │
-│   ├── audit/                     # (14) Audit log
+│   ├── audit/                     # (6) Audit log (done)
 │   │   ├── logger.go              # AuditLogger struct, writes after each handler
 │   │   ├── entry.go               # AuditEntry struct
 │   │   └── db.go                  # SQLite setup, insert and query helpers
+│   │
+│   ├── auth/                      # (7) Multi-tenant isolation
+│   │   ├── apikeys.go             # API key generation and validation
+│   │   └── tenant.go              # tenant context extraction from request
+│   │
+│   ├── dashboard/                 # (8) Admin dashboard
+│   │   ├── handler.go             # HTTP handlers for dashboard routes
+│   │   └── templates/             # HTML templates
+│   │
+│   └── rest/                      # (10) REST API wrapper
+│       ├── handler.go             # HTTP handlers for REST endpoints
+│       └── router.go              # route registration
 │
-├── audit.db                       # SQLite audit database (auto-created on startup)
-│
-├── scripts/
-│   └── init-aws.sh                # LocalStack table + seed data setup
-│
-├── testing/                       # (14) Testing and reliability
+├── docker-compose.yml             # (9) One-liner self-hosting
+├── testing/
 │   ├── integration_test.go        # real AWS integration tests
-│   ├── chaos.go                   # chaos engineering
-│   ├── load_test.go               # performance testing
 │   └── mocks.go                   # unit test mocks
 │
 └── README.md                      # Project overview, problem, solution, demo, setup
@@ -256,3 +191,4 @@ Honestly, it depends on the employer, but here's a realistic assessment:
 It's a good portfolio project if you execute it well and document it clearly. The concept alone won't impress anyone — the implementation depth and the README storytelling will. Employers want to see that you thought about real-world concerns (cost, safety, production risk), not just that you wired up an MCP server.
 
 Want to start building it? I'd suggest starting with the risk analyzer core logic first, since that's the most differentiated part.
+
