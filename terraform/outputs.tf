@@ -23,6 +23,11 @@ output "efs_file_system_id" {
   value       = aws_efs_file_system.app.id
 }
 
+output "cloudfront_domain" {
+  description = "CloudFront distribution domain (HTTPS)"
+  value       = aws_cloudfront_distribution.app.domain_name
+}
+
 output "docker_push_commands" {
   description = "Commands to build and push the Docker image to ECR and force ECS redeploy"
   value       = <<-EOT
