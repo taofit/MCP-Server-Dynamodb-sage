@@ -1,6 +1,6 @@
 # dynamodb-sage
 
-**Security-first MCP gateway for DynamoDB** — LLMs interact with DynamoDB
+**Security-first MCP gateway for DynamoDB** — LLMs securely interact with DynamoDB
 through a guardrail layer that enforces capacity limits, validates operations,
 and audits every action. Designed for safe multi-tenant AI access to production
 data.
@@ -34,11 +34,13 @@ cp .env.example .env
 
 Edit `.env`:
 ```
+# update for your project
 LOCALSTACK_AUTH_TOKEN=your_token_here
 ```
 
-### Start LocalStack
+2. Update the setting in `config.yaml` according to your project's requirements. For example: set query limit, PII fields to hide, and tables schema constraints etc.
 
+3. Start LocalStack:  
 ```bash
 docker compose up -d
 ```
@@ -80,7 +82,7 @@ This project uses **SSE transport**. Test it with the MCP Inspector:
 npx @modelcontextprotocol/inspector http://localhost:8080/sse
 ```
 
-1. Open the URL printed by the inspector in your browser.
+1. It will open a browser window with url like: `http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=5fc4c8b88aba46c528c17866c4b263f78d48aed1ee329c62ddf172ddbf519890#tools`.
 2. Click **"List Tools"** to verify tools are registered.
 3. Click **"Call Tool"** for `list_tables` to see results from LocalStack.
 
@@ -90,12 +92,19 @@ npx @modelcontextprotocol/inspector http://localhost:8080/sse
 
 ### First-Time Infrastructure Setup
 
-Deploy VPC, ECS, ALB, ECR, IAM roles, etc.:
+Deploy VPC, ECS, ALB, ECR, CloudFront, IAM roles, etc.:
 
 ```bash
 cd terraform
 terraform init
 terraform apply
+```
+
+After apply, get the CloudFront domain:
+
+```bash
+terraform output cloudfront_domain
+# → d3xxxxxxxxxxxx.cloudfront.net
 ```
 
 ### Deploy Code Changes
@@ -114,7 +123,7 @@ If not logged into ECR:
 aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 335360747704.dkr.ecr.eu-north-1.amazonaws.com/dynamodb-sage
 ```
 
-> **Infrastructure changes** (task size, env vars, health check): run `cd terraform && terraform apply` first, then the deploy command above.
+> **Infrastructure changes** (task size, env vars, health check, CloudFront): run `cd terraform && terraform apply` first, then the deploy command above.
 
 ### Check Deployment Status
 
@@ -122,17 +131,36 @@ aws ecr get-login-password --region eu-north-1 | docker login --username AWS --p
 aws ecs describe-services --cluster dynamodb-sage-cluster --service dynamodb-sage-service --region eu-north-1
 ```
 
+### CloudFront (HTTPS)
+
+After initial deployment, add CloudFront in front of the ALB for HTTPS support:
+
+```bash
+cd terraform
+terraform apply
+```
+
+This creates a CloudFront distribution with a free `*.cloudfront.net` SSL certificate.
+Get the domain:
+
+```bash
+terraform output cloudfront_domain
+# → d3xxxxxxxxxxxx.cloudfront.net
+```
+
+Update `opencode.json` and any client configs to use `https://d2fo97f8kuq5a7.cloudfront.net/sse`.
+
 ### Verify Health
 
 ```bash
-curl http://dynamodb-sage-alb-421740889.eu-north-1.elb.amazonaws.com/health
+curl https://d2fo97f8kuq5a7.cloudfront.net/health
 # → ok
 ```
 
 ### Test MCP Server on AWS
 
 ```bash
-npx @modelcontextprotocol/inspector http://dynamodb-sage-alb-421740889.eu-north-1.elb.amazonaws.com/sse
+npx @modelcontextprotocol/inspector https://d2fo97f8kuq5a7.cloudfront.net/sse
 ```
 
 ---
@@ -157,7 +185,7 @@ Add to `opencode.json` in your project root:
     },
     "dynamo-sage-aws": {
       "type": "sse",
-      "url": "http://dynamodb-sage-alb-421740889.eu-north-1.elb.amazonaws.com/sse",
+      "url": "https://d2fo97f8kuq5a7.cloudfront.net/sse",
       "enabled": true
     }
   }
@@ -166,12 +194,25 @@ Add to `opencode.json` in your project root:
 
 ### Claude Desktop (via supergateway)
 
+**Local (stdin/stdout bridge to local SSE):**
 ```json
 {
   "mcpServers": {
-    "dynamodb-sage": {
+    "dynamodb-sage-local": {
       "command": "npx",
       "args": ["-y", "supergateway", "--sse", "http://localhost:8080/sse"]
+    }
+  }
+}
+```
+
+**Remote AWS (HTTPS via CloudFront):**
+```json
+{
+  "mcpServers": {
+    "dynamodb-sage-aws": {
+      "command": "npx",
+      "args": ["-y", "supergateway", "--sse", "https://d2fo97f8kuq5a7.cloudfront.net/sse"]
     }
   }
 }
@@ -181,7 +222,7 @@ Add to `opencode.json` in your project root:
 
 Use SSE transport with the URL:
 ```
-http://dynamodb-sage-alb-421740889.eu-north-1.elb.amazonaws.com/sse
+https://d2fo97f8kuq5a7.cloudfront.net/sse
 ```
 
 ### Test from a Browser with AI Chat (No Install)
@@ -192,7 +233,7 @@ http://dynamodb-sage-alb-421740889.eu-north-1.elb.amazonaws.com/sse
 2. Click **"Add Server"** and choose **"Remote"**
 3. Enter the SSE URL:
    ```
-   http://dynamodb-sage-alb-421740889.eu-north-1.elb.amazonaws.com/sse
+   https://d2fo97f8kuq5a7.cloudfront.net/sse
    ```
 4. Click **"Connect"** — the playground auto-discovers all registered tools
 5. In the chat, ask natural language questions like:
@@ -237,7 +278,7 @@ The playground uses Claude / Gemini as the AI engine, so it handles tool selecti
 
 1. Open [Glama MCP Inspector](https://glama.ai/mcp/inspector)
 2. Click **"Add Server"**
-3. URL: `http://dynamodb-sage-alb-421740889.eu-north-1.elb.amazonaws.com/sse`
+3. URL: `https://d2fo97f8kuq5a7.cloudfront.net/sse`
 4. Click **"Connect"**
 
 **Tool call JSON examples (paste into the Arguments field):**
@@ -338,6 +379,7 @@ This project follows **GitHub Flow**:
 | **Compute** | Fargate (0.25 vCPU, 0.5 GiB) |
 | **Port** | 8080 |
 | **Transport** | SSE, health check at `/health` |
+| **HTTPS** | CloudFront (`*.cloudfront.net`) with auto-provisioned SSL |
 | **IAM** | DynamoDB full access + `sts:GetCallerIdentity` |
 | **Logs** | CloudWatch `/ecs/dynamodb-sage` (30-day retention) |
 | **Image** | `335360747704.dkr.ecr.eu-north-1.amazonaws.com/dynamodb-sage:latest` |
