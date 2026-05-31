@@ -4,7 +4,7 @@ locals {
     { name = "CONFIG_PATH", value = "/app/config.yaml" },
     { name = "DYNAMO_SAGE_ADDR", value = ":${var.container_port}" },
     { name = "DYNAMO_SAGE_DB", value = "/app/data/audit.db" },
-    { name = "MCP_TRANSPORT_MODE", value = "sse" },
+    { name = "MCP_TRANSPORT_MODE", value = "http" },
   ]
 }
 

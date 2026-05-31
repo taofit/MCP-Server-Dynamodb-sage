@@ -1,6 +1,9 @@
 package server
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -60,10 +63,15 @@ func (srv *Server) addTools() {
 					"type":        "object",
 					"description": "The exclusive start key for the scan",
 				},
+				"consistentRead": map[string]any{
+					"type":        "boolean",
+					"description": "If true, a strongly consistent read is used. Default is false (eventually consistent). Consistent reads consume more capacity units.",
+					"default":     false,
+				},
 			},
 			"required": []string{"tableName"},
 		},
-	}, srv.scanTable)
+	}, withRiskAnalysis(srv, srv.scanTable))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "put_item",
@@ -78,6 +86,29 @@ func (srv *Server) addTools() {
 				"item": map[string]any{
 					"type":        "object",
 					"description": "The item to put into the table, in JSON format",
+				},
+				"conditionExpression": map[string]any{
+					"type":        "string",
+					"description": "A condition that must be satisfied in order for a conditional put to succeed. If the condition is not met, the item is not put.",
+				},
+				"expressionAttributeNames": map[string]any{
+					"type":        "object",
+					"description": "One or more substitution tokens for attribute names in an expression.",
+				},
+				"expressionAttributeValues": map[string]any{
+					"type":        "object",
+					"description": "One or more values that can be substituted in an expression.",
+				},
+				"returnValues": map[string]any{
+					"type":        "string",
+					"description": "Use RETURN_VALUES to get the item attributes as they appeared before they were updated, or immediately after they were updated. The default value is NONE. There are also NONE, ALL_OLD, UPDATED_OLD, ALL_NEW, UPDATED_NEW.",
+					"enum": []string{
+						"NONE",
+						"ALL_OLD",
+						"UPDATED_OLD",
+						"ALL_NEW",
+						"UPDATED_NEW",
+					},
 				},
 			},
 			"required": []string{"tableName", "item"},
@@ -119,6 +150,11 @@ func (srv *Server) addTools() {
 					"type":        "object",
 					"description": "The exclusive start key for the query(pagination parameter)",
 				},
+				"consistentRead": map[string]any{
+					"type":        "boolean",
+					"description": "If true, a strongly consistent read is used. Default is false (eventually consistent). Consistent reads consume more capacity units.",
+					"default":     false,
+				},
 			},
 			"required": []string{"tableName", "keyConditionExpression", "expressionAttributeValues"},
 		},
@@ -139,6 +175,17 @@ func (srv *Server) addTools() {
 					"description": "The items put into the table in JSON format",
 					"items": map[string]any{
 						"type": "object",
+					},
+				},
+				"returnValues": map[string]any{
+					"type":        "string",
+					"description": "Use RETURN_VALUES to get the item attributes as they appeared before they were updated, or immediately after they were updated. The default value is NONE. There are also NONE, ALL_OLD, UPDATED_OLD, ALL_NEW, UPDATED_NEW.",
+					"enum": []string{
+						"NONE",
+						"ALL_OLD",
+						"UPDATED_OLD",
+						"ALL_NEW",
+						"UPDATED_NEW",
 					},
 				},
 			},
@@ -352,6 +399,16 @@ func (srv *Server) addTools() {
 					"enum":        []string{string(types.BillingModePayPerRequest), string(types.BillingModeProvisioned)},
 					"default":     string(types.BillingModePayPerRequest),
 				},
+				"readCapacityUnits": map[string]any{
+					"type":        "integer",
+					"description": "The read capacity units for the table when billing mode is PROVISIONED. Minimum value is 1.",
+					"minimum":     1,
+				},
+				"writeCapacityUnits": map[string]any{
+					"type":        "integer",
+					"description": "The write capacity units for the table when billing mode is PROVISIONED. Minimum value is 1.",
+					"minimum":     1,
+				},
 				"gsis": map[string]any{
 					"type":        "array",
 					"description": "The global secondary indexes for the table",
@@ -540,4 +597,35 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName"},
 		},
 	}, srv.updateTable)
+}
+
+func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+	return func(ctx context.Context, req *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
+		assessment, err := srv.riskAnalyzer.Analyze(ctx, req)
+		if err != nil {
+			var empty Out
+			return srv.formatWarningResult(fmt.Sprintf("risk analysis failed: %s", err), req.Params.Name), empty, nil
+		}
+		if assessment.IsHighRisk() {
+			var empty Out
+			return srv.formatWarningResult(fmt.Sprintf("high risk detected: %s", assessment.Reason), req.Params.Name), empty, nil
+		}
+		return handler(ctx, req, input)
+	}
+}
+
+func (srv *Server) formatWarningResult(reason string, operation string) *mcp.CallToolResult {
+	msg := fmt.Sprintf("⚠️ **WARNING** ⚠️\n\n"+
+		"**Reason:** %s\n"+
+		"**Calculated Cost/Impact:** High Resource Consumption.\n\n"+
+		"To complete this action, please explicitly reply with: **'Confirm execution of %s'**.", reason, operation)
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: msg,
+			},
+		},
+		IsError: false,
+	}
 }

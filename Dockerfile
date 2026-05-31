@@ -3,8 +3,6 @@
 # =============================================================================
 FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache gcc musl-dev
-
 WORKDIR /build
 
 # Cache dependency downloads
@@ -13,7 +11,7 @@ RUN go mod download
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /build/dynamodb-sage .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /build/dynamodb-sage .
 
 # =============================================================================
 # Stage 2: Minimal runtime image
@@ -34,7 +32,7 @@ COPY config.yaml /app/config.yaml
 RUN mkdir -p /app/data
 
 # Default environment variables
-ENV MCP_TRANSPORT_MODE=sse
+ENV MCP_TRANSPORT_MODE=http
 ENV CONFIG_PATH=/app/config.yaml
 ENV DYNAMO_SAGE_DB=/app/data/audit.db
 ENV DYNAMO_SAGE_ADDR=:8080

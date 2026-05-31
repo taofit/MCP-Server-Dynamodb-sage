@@ -36,4 +36,9 @@ tables:
       customer_id: "S"
       customer_name: "S"
       shipping_address: "S"
+
+risk_thresholds:
+  table_size_mb: 10        # warn if table > 10MB
+  scan_cost_usd: 0.05      # warn if scan costs > $0.05
+  bulk_delete_count: 50    # warn if deleting > 50 items
     
