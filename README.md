@@ -62,11 +62,21 @@ docker compose down
 
 ### Run Go Code
 
+By default the server uses **stdio transport** (reads MCP messages from stdin/stdout):
+
 ```bash
 go run main.go
 ```
 
-The server starts on port `8080`. Make sure LocalStack is running first.
+The server waits for MCP messages on stdin — make sure LocalStack is running first.
+
+To run as an **HTTP server** (for use with the MCP Inspector or other HTTP clients):
+
+```bash
+MCP_TRANSPORT_MODE=http go run main.go
+```
+
+The server listens on port `8080` for HTTP POST requests using Streamable HTTP transport.
 
 ### Verify DynamoDB Table
 
@@ -74,17 +84,34 @@ The server starts on port `8080`. Make sure LocalStack is running first.
 aws dynamodb scan --table-name Users --endpoint-url http://localhost:4566
 ```
 
-### Test MCP Server Locally
+### Test MCP Server Locally with Inspector
 
-This project uses **SSE transport**. Test it with the MCP Inspector:
+Test with the MCP Inspector (requires Node.js/npm, opens browser):
 
-```bash
-npx @modelcontextprotocol/inspector http://localhost:8080/sse
-```
+**Option A — HTTP mode** (recommended for testing, no restart needed):
 
-1. It will open a browser window with url like: `http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=5fc4c8b88aba46c528c17866c4b263f78d48aed1ee329c62ddf172ddbf519890#tools`.
-2. Click **"List Tools"** to verify tools are registered.
-3. Click **"Call Tool"** for `list_tables` to see results from LocalStack.
+1. In one terminal, start the server in HTTP mode:
+   ```bash
+   MCP_TRANSPORT_MODE=http go run main.go
+   ```
+2. In another terminal, run the inspector with `--transport http`:
+   ```bash
+   npx @modelcontextprotocol/inspector --transport http http://localhost:8080
+   ```
+4. Click **"List Tools"** to verify tools are registered.
+5. Click **"Call Tool"** for `list_tables` to see results from LocalStack.
+
+**Option B — Stdio mode** (uses the default transport):
+
+1. Run the inspector:
+   ```bash
+   npx @modelcontextprotocol/inspector
+   ```
+2. In the browser, set transport type to **stdio**, command to `go run main.go`.
+3. Set the working directory by using `sh -c`:  
+   **Command**: `sh`  
+   **Args**: `-c`, `cd /path/to/project && exec go run main.go`
+4. Add required environment variables in the inspector's **Environment Variables** section (or they'll be inherited from your terminal).
 
 ---
 
@@ -92,12 +119,44 @@ npx @modelcontextprotocol/inspector http://localhost:8080/sse
 
 ### First-Time Infrastructure Setup
 
-Deploy VPC, ECS, ALB, ECR, CloudFront, IAM roles, etc.:
+Deploy VPC, ECS, ALB, ECR, CloudFront, IAM roles, and DynamoDB tables:
 
 ```bash
 cd terraform
 terraform init
 terraform apply
+```
+
+This creates:
+- **Users table**: Primary key `user_id`, with a GSI `emailIndex` on `email`
+- **Orders table**: Primary key `customer_id`
+
+> **Note**: If you don't want to create default tables during initial setup, delete or rename `terraform/dynamodb.tf` before running `terraform apply`. You can create tables later through the MCP server tools or AWS CLI.
+
+To add or customize tables, edit `terraform/dynamodb.tf` before running `terraform apply`:
+
+```hcl
+resource "aws_dynamodb_table" "your_table" {
+  name           = "YourTableName"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "your_primary_key"
+
+  attribute {
+    name = "your_primary_key"
+    type = "S"
+  }
+
+  # Add GSI if needed
+  global_secondary_index {
+    name            = "your_gsi_name"
+    hash_key        = "your_gsi_key"
+    projection_type = "ALL"
+  }
+
+  tags = {
+    TablePurpose = "YourPurpose"
+  }
+}
 ```
 
 After apply, get the CloudFront domain:
@@ -131,25 +190,6 @@ aws ecr get-login-password --region eu-north-1 | docker login --username AWS --p
 aws ecs describe-services --cluster dynamodb-sage-cluster --service dynamodb-sage-service --region eu-north-1
 ```
 
-### CloudFront (HTTPS)
-
-After initial deployment, add CloudFront in front of the ALB for HTTPS support:
-
-```bash
-cd terraform
-terraform apply
-```
-
-This creates a CloudFront distribution with a free `*.cloudfront.net` SSL certificate.
-Get the domain:
-
-```bash
-terraform output cloudfront_domain
-# → d3xxxxxxxxxxxx.cloudfront.net
-```
-
-Update `opencode.json` and any client configs to use `https://d2fo97f8kuq5a7.cloudfront.net/sse`.
-
 ### Verify Health
 
 ```bash
@@ -159,10 +199,16 @@ curl https://d2fo97f8kuq5a7.cloudfront.net/health
 
 ### Test MCP Server on AWS
 
-```bash
-npx @modelcontextprotocol/inspector https://d2fo97f8kuq5a7.cloudfront.net/sse
-```
+The inspector web UI only supports SSE and Stdio transports. Use the `--transport http` CLI flag:
 
+```bash
+npx @modelcontextprotocol/inspector --transport http https://d2fo97f8kuq5a7.cloudfront.net
+```
+or run 
+```bash
+npx @modelcontextprotocol/inspector --transport http
+```
+and add `https://d2fo97f8kuq5a7.cloudfront.net` as the server URL in the Streamable transport type.
 ---
 
 ## Connecting MCP Clients
@@ -170,49 +216,76 @@ npx @modelcontextprotocol/inspector https://d2fo97f8kuq5a7.cloudfront.net/sse
 ### opencode
 
 Add to `opencode.json` in your project root:
+
 ```json
 {
   "mcpServers": {
     "dynamo-sage-local": {
       "type": "local",
-      "command": ["./dynamo-sage"],
-      "enabled": true,
-      "env": {
-        "DYNAMO_SAGE_CONFIG": "config.yaml",
-        "DYNAMO_SAGE_DB": "data/audit.db",
-        "DYNAMO_SAGE_ADDR": ":8080"
-      }
+      "command": ["go", "run", "main.go"],
+      "enabled": true
     },
     "dynamo-sage-aws": {
       "type": "sse",
-      "url": "https://d2fo97f8kuq5a7.cloudfront.net/sse",
+      "url": "https://d2fo97f8kuq5a7.cloudfront.net",
       "enabled": true
     }
   }
 }
 ```
 
-### Claude Desktop (via supergateway)
+### Claude Desktop
 
-**Local (stdin/stdout bridge to local SSE):**
+**Local (stdio):**
+
+The server loads `.env` automatically. When using `sh -c`, the working directory is the project root so `.env` is found — no env vars needed in config.
+
 ```json
 {
   "mcpServers": {
     "dynamodb-sage-local": {
-      "command": "npx",
-      "args": ["-y", "supergateway", "--sse", "http://localhost:8080/sse"]
+      "command": "sh",
+      "args": ["-c", "cd /path/to/dynamodb-sage && exec go run main.go"]
     }
   }
 }
 ```
 
-**Remote AWS (HTTPS via CloudFront):**
+> Copy `.env.example` to `.env` and fill in your own credentials before starting.
+
+**Pre-built binary** (faster startup, but must pass env vars explicitly):
+
+```bash
+cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
+```
+
+```json
+{
+  "mcpServers": {
+    "dynamodb-sage-local": {
+      "command": "/tmp/dynamodb-sage",
+      "env": {
+        "LOCALSTACK_AUTH_TOKEN": "your_token_here",
+        "AWS_BASE_ENDPOINT": "http://localhost:4566",
+        "AWS_REGION": "eu-north-1",
+        "AWS_ACCESS_KEY_ID": "your_access_key",
+        "AWS_SECRET_ACCESS_KEY": "your_secret_key",
+        "CONFIG_PATH": "/path/to/dynamodb-sage/config.yaml",
+        "DYNAMO_SAGE_DB": "/path/to/dynamodb-sage/data/audit.db"
+      }
+    }
+  }
+}
+```
+
+**Remote AWS (via supergateway, Streamable HTTP):**
+
 ```json
 {
   "mcpServers": {
     "dynamodb-sage-aws": {
       "command": "npx",
-      "args": ["-y", "supergateway", "--sse", "https://d2fo97f8kuq5a7.cloudfront.net/sse"]
+      "args": ["-y", "supergateway", "--streamableHttp", "https://d2fo97f8kuq5a7.cloudfront.net", "--streamableHttpPath", "/"]
     }
   }
 }
@@ -220,9 +293,9 @@ Add to `opencode.json` in your project root:
 
 ### Any MCP Client
 
-Use SSE transport with the URL:
+Use Streamable HTTP transport with the URL:
 ```
-https://d2fo97f8kuq5a7.cloudfront.net/sse
+https://d2fo97f8kuq5a7.cloudfront.net
 ```
 
 ### Test from a Browser with AI Chat (No Install)
@@ -231,9 +304,9 @@ https://d2fo97f8kuq5a7.cloudfront.net/sse
 
 1. Open [https://mcpsplayground.com](https://mcpsplayground.com)
 2. Click **"Add Server"** and choose **"Remote"**
-3. Enter the SSE URL:
+3. Enter the URL:
    ```
-   https://d2fo97f8kuq5a7.cloudfront.net/sse
+   https://d2fo97f8kuq5a7.cloudfront.net
    ```
 4. Click **"Connect"** — the playground auto-discovers all registered tools
 5. In the chat, ask natural language questions like:
@@ -278,7 +351,7 @@ The playground uses Claude / Gemini as the AI engine, so it handles tool selecti
 
 1. Open [Glama MCP Inspector](https://glama.ai/mcp/inspector)
 2. Click **"Add Server"**
-3. URL: `https://d2fo97f8kuq5a7.cloudfront.net/sse`
+3. URL: `https://d2fo97f8kuq5a7.cloudfront.net`
 4. Click **"Connect"**
 
 **Tool call JSON examples (paste into the Arguments field):**
@@ -378,7 +451,7 @@ This project follows **GitHub Flow**:
 | **Region** | `eu-north-1` |
 | **Compute** | Fargate (0.25 vCPU, 0.5 GiB) |
 | **Port** | 8080 |
-| **Transport** | SSE, health check at `/health` |
+| **Transport** | Streamable HTTP, health check at `/health` |
 | **HTTPS** | CloudFront (`*.cloudfront.net`) with auto-provisioned SSL |
 | **IAM** | DynamoDB full access + `sts:GetCallerIdentity` |
 | **Logs** | CloudWatch `/ecs/dynamodb-sage` (30-day retention) |

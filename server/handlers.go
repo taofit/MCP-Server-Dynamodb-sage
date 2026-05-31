@@ -121,13 +121,18 @@ func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *
 }
 
 func (srv *Server) listTables(ctx context.Context, req *mcp.CallToolRequest, args *ListTablesArgs) (*mcp.CallToolResult, any, error) {
-	out, err := srv.db.ListTables(ctx, &dynamodb.ListTablesInput{})
-	if err != nil {
-		srv.sendAuditLog("list_tables", "", "", nil, err)
-		return srv.errorResult(fmt.Sprintf("Error when listing tables: %v", err)), nil, nil
+	var allTables []string
+	paginator := dynamodb.NewListTablesPaginator(srv.db, &dynamodb.ListTablesInput{})
+	for paginator.HasMorePages() {
+		out, err := paginator.NextPage(ctx)
+		if err != nil {
+			srv.sendAuditLog("list_tables", "", "", nil, err)
+			return srv.errorResult(fmt.Sprintf("Error when listing tables: %v", err)), nil, nil
+		}
+		allTables = append(allTables, out.TableNames...)
 	}
 
-	tables := strings.Join(out.TableNames, ", ")
+	tables := strings.Join(allTables, ", ")
 	if tables == "" {
 		tables = "(no tables found)"
 	}

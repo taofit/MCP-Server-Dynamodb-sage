@@ -2,6 +2,7 @@
 /dynamodb-sage
 /dynamo-sage
 /main
+/bin/
 *.exe
 *.exe~
 *.dll
@@ -37,10 +38,14 @@ Thumbs.db
 # Ignore the local audit database
 .data/
 *.db
+# Risk analyzer (committed once, ignore local changes)
+internal/risk/analyzer.go
+
 # Terraform
 terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
+terraform/dynamodb.tf
 
 # Dependencies
 # (Uncomment if you use vendor directory)

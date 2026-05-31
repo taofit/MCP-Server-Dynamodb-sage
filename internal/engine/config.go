@@ -19,16 +19,34 @@ type GlobalLimits struct {
 	DefaultLimit int32 `yaml:"default_limit"`
 }
 
-type AppConfig struct {
-	GlobalLimits    GlobalLimits  `yaml:"global_limits"`
-	SensitiveFields []string      `yaml:"sensitive_fields"`
-	ProtectedTables []string      `yaml:"protected_tables"`
-	Tables          []TableConfig `yaml:"tables"`
+type RiskThresholds struct {
+	TableSizeMB                float64 `yaml:"table_size_mb"`
+	ScanCostUSD                float64 `yaml:"scan_cost_usd"`
+	BulkDeleteCount            int     `yaml:"bulk_delete_count"`
+	BatchGetItemCountThreshold int     `yaml:"batch_get_item_count_threshold"`
 }
 
+type AppConfig struct {
+	GlobalLimits    GlobalLimits   `yaml:"global_limits"`
+	SensitiveFields []string       `yaml:"sensitive_fields"`
+	ProtectedTables []string       `yaml:"protected_tables"`
+	Tables          []TableConfig  `yaml:"tables"`
+	RiskThresholds  RiskThresholds `yaml:"risk_thresholds"`
+	RiskLevel       RiskLevel      `yaml:"risk_level"`
+}
+
+type RiskLevel int
+
 const (
-	DefaultMaxLimit     int32 = 100
-	DefaultLimit int32 = 20
+	LowRiskLevel      RiskLevel = 0
+	MediumRiskLevel   RiskLevel = 1
+	HighRiskLevel     RiskLevel = 2
+	CriticalRiskLevel RiskLevel = 3
+)
+
+const (
+	DefaultMaxLimit int32 = 100
+	DefaultLimit    int32 = 20
 )
 
 func LoadConfig(filename string) (*AppConfig, error) {

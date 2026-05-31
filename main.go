@@ -99,7 +99,7 @@ func main() {
 		if err := srv.ServeStdio(); err != nil {
 			log.Fatalf("failed to serve dynamo-sage MCP server on standard IO: %v", err)
 		}
-	case "sse":
+	case "http":
 		if err := srv.ServeHTTP(":8080"); err != nil {
 			log.Fatalf("failed to serve dynamo-sage MCP server on HTTP: %v", err)
 		}

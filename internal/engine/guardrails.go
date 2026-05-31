@@ -10,13 +10,13 @@ import (
 
 type Guardrail struct {
 	protectedTable map[string]bool
-	config         AppConfig
+	config         *AppConfig
 }
 
 const MaxIndividualSize = 400 * 1024
 const MaxBatchSize = 16 * 1024 * 1024
 
-func NewGuardrail(config AppConfig) *Guardrail {
+func NewGuardrail(config *AppConfig) *Guardrail {
 	protectedTable := make(map[string]bool)
 	for _, t := range config.ProtectedTables {
 		protectedTable[t] = true
