@@ -43,6 +43,7 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 		Limit:                     &limit,
 		ExclusiveStartKey:         startKey,
 		ReturnConsumedCapacity:    types.ReturnConsumedCapacityTotal,
+		ConsistentRead:            args.ConsistentRead,
 	}
 	if args.IndexName != "" {
 		qi.IndexName = &args.IndexName
@@ -235,6 +236,9 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 			return srv.errorResult(fmt.Sprintf("Error when marshaling exclusive start key: %v", err)), nil, nil
 		}
 		input.ExclusiveStartKey = startKey
+	}
+	if args.ConsistentRead != nil {
+		input.ConsistentRead = args.ConsistentRead
 	}
 	out, err := srv.db.Scan(ctx, input)
 

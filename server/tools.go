@@ -87,37 +87,31 @@ func (srv *Server) addTools() {
 					"type":        "object",
 					"description": "The item to put into the table, in JSON format",
 				},
-				"conditionExpression": map[string]any{
-					"type":        "string",
-					"description": "A condition that must be satisfied in order for a conditional put to succeed. If the condition is not met, the item is not put.",
-				},
-				"expressionAttributeNames": map[string]any{
-					"type":        "object",
-					"description": "One or more substitution tokens for attribute names in an expression.",
-				},
-				"expressionAttributeValues": map[string]any{
-					"type":        "object",
-					"description": "One or more values that can be substituted in an expression.",
-				},
-				"returnValues": map[string]any{
-					"type":        "string",
-					"description": "Use RETURN_VALUES to get the item attributes as they appeared before they were updated, or immediately after they were updated. The default value is NONE. There are also NONE, ALL_OLD, UPDATED_OLD, ALL_NEW, UPDATED_NEW.",
-					"enum": []string{
-						"NONE",
-						"ALL_OLD",
-						"UPDATED_OLD",
-						"ALL_NEW",
-						"UPDATED_NEW",
-					},
-				},
 			},
 			"required": []string{"tableName", "item"},
 		},
 	}, srv.putItem)
 
 	mcp.AddTool(srv.s, &mcp.Tool{
-		Name:        "query_table",
-		Description: "PREFERRED over scan_table. Efficiently query a table using a key condition or GSI index. Much cheaper and faster than scanning. Use this whenever you know the partition key or have a GSI available.",
+		Name: "query_table",
+		Description: `PREFERRED over scan_table. Efficiently query a table using a key condition or GSI index. Much cheaper and faster than scanning. Use this whenever you know the partition key or have a GSI available.
+		Common mistakes:
+		1. The keyConditionExpression must include the table's partition key (HASH). If the table has a sort key (RANGE), you may optionally include it too. Omitting the partition key or using a wrong attribute name will cause: "Query condition missed key schema element".
+		2. Attribute names in expressionAttributeNames must map to actual attribute names in the table, not arbitrary aliases. For example, if the hash key attribute is named "id", use {"#id": "id"} — NOT {"#id": "uid"}.
+		3. The values in expressionAttributeValues must match the type of the key attribute. If "id" is a Number (N), pass a number like :id 1 — not a string like :id "matt".
+
+		Example — querying a table with a composite key (hash + range):
+		Table "Human" has key schema: id (HASH, Number), name (RANGE, String)
+
+		Correct query:
+		expressionAttributeNames: {"#id": "id", "#n": "name"}
+		expressionAttributeValues: {":id": 1, ":n": "matt"}
+		keyConditionExpression: "#id = :id AND #n = :n"
+
+		If you only need the partition key:
+		expressionAttributeNames: {"#id": "id"}
+		expressionAttributeValues: {":id": 1}
+		keyConditionExpression: "#id = :id"`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -131,15 +125,15 @@ func (srv *Server) addTools() {
 				},
 				"keyConditionExpression": map[string]any{
 					"type":        "string",
-					"description": "The condition expression for the query",
+					"description": "The condition expression for the query. Must include the partition key. Optionally include the sort key with AND. Example: \"#pk = :pkVal AND #sk = :skVal\"",
 				},
 				"expressionAttributeValues": map[string]any{
 					"type":        "object",
-					"description": "The expression attribute values for the query",
+					"description": "The expression attribute values for the query. Values must match the key attribute types (Number vs String). Example: {\":pkVal\": 1, \":skVal\": \"matt\"}",
 				},
 				"expressionAttributeNames": map[string]any{
 					"type":        "object",
-					"description": "The expression attribute names for the query",
+					"description": "The expression attribute names for the query. Maps placeholders to real attribute names. Example: {\"#pk\": \"id\", \"#sk\": \"name\"}",
 				},
 				"limit": map[string]any{
 					"type":        "integer",
@@ -175,17 +169,6 @@ func (srv *Server) addTools() {
 					"description": "The items put into the table in JSON format",
 					"items": map[string]any{
 						"type": "object",
-					},
-				},
-				"returnValues": map[string]any{
-					"type":        "string",
-					"description": "Use RETURN_VALUES to get the item attributes as they appeared before they were updated, or immediately after they were updated. The default value is NONE. There are also NONE, ALL_OLD, UPDATED_OLD, ALL_NEW, UPDATED_NEW.",
-					"enum": []string{
-						"NONE",
-						"ALL_OLD",
-						"UPDATED_OLD",
-						"ALL_NEW",
-						"UPDATED_NEW",
 					},
 				},
 			},
@@ -401,12 +384,12 @@ func (srv *Server) addTools() {
 				},
 				"readCapacityUnits": map[string]any{
 					"type":        "integer",
-					"description": "The read capacity units for the table when billing mode is PROVISIONED. Minimum value is 1.",
+					"description": "The read capacity units for the table",
 					"minimum":     1,
 				},
 				"writeCapacityUnits": map[string]any{
 					"type":        "integer",
-					"description": "The write capacity units for the table when billing mode is PROVISIONED. Minimum value is 1.",
+					"description": "The write capacity units for the table",
 					"minimum":     1,
 				},
 				"gsis": map[string]any{

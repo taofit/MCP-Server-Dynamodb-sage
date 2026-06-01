@@ -209,6 +209,7 @@ or run
 npx @modelcontextprotocol/inspector --transport http
 ```
 and add `https://d2fo97f8kuq5a7.cloudfront.net` as the server URL in the Streamable transport type.
+
 ---
 
 ## Connecting MCP Clients

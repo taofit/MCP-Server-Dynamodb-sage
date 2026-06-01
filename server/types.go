@@ -20,6 +20,7 @@ type ScanTableArgs struct {
 	ProjectionExpression      string         `json:"projectionExpression"`
 	Limit                     int32          `json:"limit"`
 	ExclusiveStartKey         map[string]any `json:"exclusiveStartKey"`
+	ConsistentRead            *bool          `json:"consistentRead"`
 }
 
 type PutItemArgs struct {
@@ -35,6 +36,7 @@ type QueryTableArgs struct {
 	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues"`
 	Limit                     int32             `json:"limit"`
 	ExclusiveStartKey         map[string]any    `json:"exclusiveStartKey"`
+	ConsistentRead            *bool             `json:"consistentRead"`
 }
 
 type BatchPutItemsArgs struct {
