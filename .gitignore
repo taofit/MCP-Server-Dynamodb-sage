@@ -47,6 +47,10 @@ terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/dynamodb.tf
 
+# Windsurf settings
+.windsurfignore
+.windsurfrules
+
 # Dependencies
 # (Uncomment if you use vendor directory)
 # vendor/
