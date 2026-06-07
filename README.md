@@ -11,7 +11,7 @@ Key differentiators:
   and throughput
 - **No direct SQL/NoSQL injection**: structured tool calls only
 
-[![Demo Video](https://img.youtube.com/vi/zt_6hMwcw2c/maxresdefault.jpg)](https://www.youtube.com/watch?v=zt_6hMwcw2c)
+[![Demo Video](https://img.youtube.com/vi/f4i8fxrdEBw/maxresdefault.jpg)](https://www.youtube.com/watch?v=f4i8fxrdEBw)
 
 ## Prerequisites
 
@@ -121,8 +121,8 @@ Two deployment options are available:
 
 ### Option A: Lightsail (Active — $5/mo)
 
-Deploy a single Lightsail instance with nginx, Let's Encrypt HTTPS, and your own domain.
-
+Deploy a single Lightsail instance with nginx, TLS Encrypted HTTPS, and your own domain.
+Infrastructure code is preserved at `terraform/lightsail/` for reference.
 **First-time setup:**
 
 ```bash
@@ -146,12 +146,20 @@ terraform output static_ip
 
 **One-time domain & HTTPS setup:**
 
-1. At your DNS provider (e.g. one.com), add an A record pointing to the static IP
-2. Run the deploy script which sets up nginx, obtains certs, and deploys the app:
+1. Get the static IP from terraform output:
+   ```bash
+   terraform output static_ip
+   ```
 
-```bash
-bash scripts/deploy.sh dynamodb-sage.yourdomain.com
-```
+2. At your DNS provider (e.g. one.com), add an A record:
+   - **Type**: A
+   - **Host**: `dynamodb-sage`
+   - **Value**: `[STATIC_IP]`
+
+3. Run the deploy script with your actual domain:
+   ```bash
+   bash scripts/deploy.sh dynamodb-sage.yourdomain.com
+   ```
 
 **Deploy code changes:**
 
@@ -213,7 +221,7 @@ aws ecs describe-services --cluster dynamodb-sage-cluster --service dynamodb-sag
 
 ## Connecting MCP Clients
 
-> **Public demo server** available at `https://dynamodb-sage.hzcentre.com` — try it directly with any MCP client. Guardrails and risk analysis protect against abuse.
+> **Public demo server** available at `https://dynamodb-sage.hzcentre.com` — try it directly with any MCP client by replacing the URL `https://dynamodb-sage.yourdomain.com` with `https://dynamodb-sage.hzcentre.com` in the json configue file of the MCP client (e.g. `opencode.json`, `claude_desktop_config.json`, etc.). Guardrails and risk analysis protect against abuse.
 
 ### opencode
 
@@ -353,7 +361,7 @@ https://dynamodb-sage.yourdomain.com
 
 1. Open [Glama MCP Inspector](https://glama.ai/mcp/inspector)
 2. Click **"Add Server"**
-3. URL: `https://dynamodb-sage.yourdomain.com`
+3. URL: `https://dynamodb-sage.yourdomain.com` or you can use my public demo server at `https://dynamodb-sage.hzcentre.com`
 4. Click **"Connect"**
 
 **Tool call JSON examples (paste into the Arguments field):**
@@ -474,4 +482,3 @@ Two deployment options are available:
 | **HTTPS** | CloudFront (`*.cloudfront.net`) with auto-provisioned SSL |
 | **IAM** | DynamoDB full access + `sts:GetCallerIdentity` |
 | **Logs** | CloudWatch `/ecs/dynamodb-sage` (30-day retention) |
-| **Image** | `335360747704.dkr.ecr.eu-north-1.amazonaws.com/dynamodb-sage:latest` |

@@ -16,6 +16,8 @@ sensitive_fields:
 protected_tables:
   - Transactions
   - SystemConfig
+  - Users
+  - Orders
 
 tables:
   - name: "Users"
