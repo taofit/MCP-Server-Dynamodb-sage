@@ -1,12 +1,13 @@
 # dynamodb-sage
 
 **Security-first MCP gateway for DynamoDB** — LLMs securely interact with DynamoDB
-through a guardrail layer that enforces capacity limits, validates operations,
-and audits every action. Designed for safe multi-tenant AI access to production
+through a two-layer protection system: a **risk analyzer** pre-assesses every operation,
+then **guardrails** enforce capacity limits, validate schemas, and protect sensitive tables.
+Every action is audited. Designed for safe multi-tenant AI access to production
 data.
 
 Key differentiators:
-- **Guardrails**: capacity caps, operation whitelists, query limits
+- **Two-layer protection**: risk analyzer pre-checks every operation for cost, size, and destructive potential; guardrails enforce hard limits on throughput, batch sizes, and schema compliance
 - **Audit trail**: every DynamoDB operation logged with principal, timestamp,
   and throughput
 - **No direct SQL/NoSQL injection**: structured tool calls only
@@ -222,6 +223,8 @@ aws ecs describe-services --cluster dynamodb-sage-cluster --service dynamodb-sag
 ## Connecting MCP Clients
 
 > **Public demo server** available at `https://dynamodb-sage.hzcentre.com` — try it directly with any MCP client by replacing the URL `https://dynamodb-sage.yourdomain.com` with `https://dynamodb-sage.hzcentre.com` in the json configue file of the MCP client (e.g. `opencode.json`, `claude_desktop_config.json`, etc.). Guardrails and risk analysis protect against abuse.
+
+> ⚠️ **Important**: The risk analyzer may return warnings for expensive or destructive operations (e.g. large scans, batch deletes, schema changes). Some MCP clients (including Claude) may auto-confirm these warnings without asking you. To prevent this, tell the LLM explicitly: *"If the server returns a risk warning, show it to me and ask for my confirmation before proceeding. Never auto-confirm."*
 
 ### opencode
 
