@@ -1,12 +1,13 @@
 # dynamodb-sage
 
 **Security-first MCP gateway for DynamoDB** — LLMs securely interact with DynamoDB
-through a guardrail layer that enforces capacity limits, validates operations,
+through a guardrail layer that pre-analyzes risk, enforces capacity limits, validates operations,
 and audits every action. Designed for safe multi-tenant AI access to production
 data.
 
 Key differentiators:
-- **Guardrails**: capacity caps, operation whitelists, query limits
+- **Risk analysis**: pre-execution assessment of every operation — estimates scan costs, detects oversized payloads, flags batch count overflows, and warns before destructive actions
+- **Guardrails**: capacity caps, operation whitelists, query limits, protected tables
 - **Audit trail**: every DynamoDB operation logged with principal, timestamp,
   and throughput
 - **No direct SQL/NoSQL injection**: structured tool calls only
