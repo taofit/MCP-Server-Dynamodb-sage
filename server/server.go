@@ -21,6 +21,7 @@ type Server struct {
 	userID       string
 	userARN      string
 	riskAnalyzer *risk.RiskAnalyzer
+	sseHandler   *mcp.SSEHandler
 }
 
 type AuditBackend interface {
@@ -38,7 +39,7 @@ func New(db *dynamodb.Client, userID, userARN, configPath, dbPath string) *Serve
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	guardrail := engine.NewGuardrail(config)
-	riskAnalyzer := risk.NewRiskAnalyzer(config, db)
+	riskAnalyzer := risk.NewRiskAnalyzer(config, db, guardrail)
 	auditLog, err := audit.NewAuditLog(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to create audit log: %v", err)
@@ -52,6 +53,9 @@ func New(db *dynamodb.Client, userID, userARN, configPath, dbPath string) *Serve
 		userARN:      userARN,
 		riskAnalyzer: riskAnalyzer,
 	}
+	srv.sseHandler = mcp.NewSSEHandler(func(req *http.Request) *mcp.Server {
+		return srv.s
+	}, nil)
 	srv.addTools()
 
 	return srv
@@ -61,13 +65,14 @@ func (srv *Server) HTTPHandler() http.Handler {
 	handler := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
 		return srv.s
 	}, &mcp.StreamableHTTPOptions{
-		JSONResponse: true,
-		Stateless:    true,
+		JSONResponse:                true,
+		Stateless:                   true,
+		DisableLocalhostProtection:  true,
 	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version")
 		w.Header().Set("Access-Control-Expose-Headers", "Content-Type")
 
@@ -78,6 +83,11 @@ func (srv *Server) HTTPHandler() http.Handler {
 
 		if r.URL.Path == "/health" {
 			srv.HealthHandler(w, r)
+			return
+		}
+
+		if r.URL.Path == "/sse" {
+			srv.sseHandler.ServeHTTP(w, r)
 			return
 		}
 

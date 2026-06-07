@@ -22,8 +22,11 @@ type GlobalLimits struct {
 type RiskThresholds struct {
 	TableSizeMB                float64 `yaml:"table_size_mb"`
 	ScanCostUSD                float64 `yaml:"scan_cost_usd"`
-	BulkDeleteCount            int     `yaml:"bulk_delete_count"`
-	BatchGetItemCountThreshold int     `yaml:"batch_get_item_count_threshold"`
+	BatchDeleteCount           int32   `yaml:"batch_delete_count"`
+	BatchGetCount              int32   `yaml:"batch_get_count"`
+	BatchPutCount              int32   `yaml:"batch_put_count"`
+	MaxThroughputIncrease      int32   `yaml:"max_throughput_increase"`
+	UpdateExpressionDepth      int32   `yaml:"update_expression_depth"`
 }
 
 type AppConfig struct {
@@ -45,8 +48,12 @@ const (
 )
 
 const (
-	DefaultMaxLimit int32 = 100
-	DefaultLimit    int32 = 20
+	DefaultMaxLimit            int32 = 100
+	DefaultLimit               int32 = 20
+	DefaultMaxThroughputIncrease int32 = 2000
+	DefaultUpdateExpressionDepth int32 = 5
+	DefaultScanCostUSD         float64 = 0.05
+	DefaultTableSizeMB         float64 = 10// 10MB
 )
 
 func LoadConfig(filename string) (*AppConfig, error) {
@@ -69,6 +76,29 @@ func LoadConfig(filename string) (*AppConfig, error) {
 	if config.GlobalLimits.DefaultLimit > config.GlobalLimits.MaxLimit {
 		config.GlobalLimits.DefaultLimit = config.GlobalLimits.MaxLimit
 	}
+
+	if config.RiskThresholds.BatchPutCount <= 0 {
+		config.RiskThresholds.BatchPutCount = DefaultMaxLimit
+	}
+	if config.RiskThresholds.BatchDeleteCount <= 0 {
+		config.RiskThresholds.BatchDeleteCount = DefaultMaxLimit
+	}
+	if config.RiskThresholds.BatchGetCount <= 0 {
+		config.RiskThresholds.BatchGetCount = DefaultMaxLimit
+	}
+	if config.RiskThresholds.MaxThroughputIncrease <= 0 {
+		config.RiskThresholds.MaxThroughputIncrease = DefaultMaxThroughputIncrease
+	}
+	if config.RiskThresholds.UpdateExpressionDepth <= 0 {
+		config.RiskThresholds.UpdateExpressionDepth = DefaultUpdateExpressionDepth
+	}
+	if config.RiskThresholds.ScanCostUSD <= 0 {
+		config.RiskThresholds.ScanCostUSD = DefaultScanCostUSD
+	}
+	if config.RiskThresholds.TableSizeMB <= 0 {
+		config.RiskThresholds.TableSizeMB = DefaultTableSizeMB
+	}
+	
 
 	return &config, nil
 }

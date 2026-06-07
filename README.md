@@ -117,58 +117,78 @@ Test with the MCP Inspector (requires Node.js/npm, opens browser):
 
 ## AWS Deployment
 
-### First-Time Infrastructure Setup
+Two deployment options are available:
 
-Deploy VPC, ECS, ALB, ECR, CloudFront, IAM roles, and DynamoDB tables:
+### Option A: Lightsail (Active — $5/mo)
+
+Deploy a single Lightsail instance with nginx, Let's Encrypt HTTPS, and your own domain.
+
+**First-time setup:**
 
 ```bash
-cd terraform
+cd terraform/lightsail
 terraform init
 terraform apply
 ```
 
 This creates:
-- **Users table**: Primary key `user_id`, with a GSI `emailIndex` on `email`
-- **Orders table**: Primary key `customer_id`
+- Lightsail instance (`nano_3_0`, Ubuntu 22.04)
+- Static IP address
+- SSH key (saved to `keys/lightsail.pem`)
+- IAM user with `AmazonDynamoDBFullAccess` (credentials saved to `keys/lightsail-credentials.ini`)
+- Firewall rules (ports 22, 80, 443)
 
-> **Note**: If you don't want to create default tables during initial setup, delete or rename `terraform/dynamodb.tf` before running `terraform apply`. You can create tables later through the MCP server tools or AWS CLI.
+After apply, note the static IP:
 
-To add or customize tables, edit `terraform/dynamodb.tf` before running `terraform apply`:
-
-```hcl
-resource "aws_dynamodb_table" "your_table" {
-  name           = "YourTableName"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "your_primary_key"
-
-  attribute {
-    name = "your_primary_key"
-    type = "S"
-  }
-
-  # Add GSI if needed
-  global_secondary_index {
-    name            = "your_gsi_name"
-    hash_key        = "your_gsi_key"
-    projection_type = "ALL"
-  }
-
-  tags = {
-    TablePurpose = "YourPurpose"
-  }
-}
+```bash
+terraform output static_ip
 ```
 
-After apply, get the CloudFront domain:
+**One-time domain & HTTPS setup:**
+
+1. At your DNS provider (e.g. one.com), add an A record pointing to the static IP
+2. Run the deploy script which sets up nginx, obtains certs, and deploys the app:
+
+```bash
+bash scripts/deploy.sh dynamodb-sage.yourdomain.com
+```
+
+**Deploy code changes:**
+
+```bash
+GOOS=linux GOARCH=amd64 go build -o /tmp/dynamodb-sage .
+scp -i keys/lightsail.pem /tmp/dynamodb-sage ubuntu@<IP>:/tmp/dynamodb-sage
+ssh -i keys/lightsail.pem ubuntu@<IP> sudo systemctl restart dynamodb-sage
+```
+
+**Verify health:**
+
+```bash
+curl https://dynamodb-sage.yourdomain.com/health
+# → ok
+```
+
+---
+
+### Option B: ECS + ALB + CloudFront (Reference — Archived)
+
+The original high-availability deployment using ECS Fargate, ALB, CloudFront, and ECR.
+Infrastructure code is preserved at `terraform/ecs-cloudfront/` for reference.
+
+```bash
+cd terraform/ecs-cloudfront
+terraform init
+terraform apply
+```
+
+After apply:
 
 ```bash
 terraform output cloudfront_domain
 # → d3xxxxxxxxxxxx.cloudfront.net
 ```
 
-### Deploy Code Changes
-
-Build, push to ECR, and trigger a new Fargate deployment:
+**Deploy code changes (ECS):**
 
 ```bash
 docker buildx build --platform=linux/amd64 -t dynamodb-sage . --load && \
@@ -178,37 +198,16 @@ aws ecs update-service --cluster dynamodb-sage-cluster --service dynamodb-sage-s
 ```
 
 If not logged into ECR:
+
 ```bash
 aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 335360747704.dkr.ecr.eu-north-1.amazonaws.com/dynamodb-sage
 ```
 
-> **Infrastructure changes** (task size, env vars, health check, CloudFront): run `cd terraform && terraform apply` first, then the deploy command above.
-
-### Check Deployment Status
+**Check ECS status:**
 
 ```bash
 aws ecs describe-services --cluster dynamodb-sage-cluster --service dynamodb-sage-service --region eu-north-1
 ```
-
-### Verify Health
-
-```bash
-curl https://d2fo97f8kuq5a7.cloudfront.net/health
-# → ok
-```
-
-### Test MCP Server on AWS
-
-The inspector web UI only supports SSE and Stdio transports. Use the `--transport http` CLI flag:
-
-```bash
-npx @modelcontextprotocol/inspector --transport http https://d2fo97f8kuq5a7.cloudfront.net
-```
-or run 
-```bash
-npx @modelcontextprotocol/inspector --transport http
-```
-and add `https://d2fo97f8kuq5a7.cloudfront.net` as the server URL in the Streamable transport type.
 
 ---
 
@@ -227,8 +226,8 @@ Add to `opencode.json` in your project root:
       "enabled": true
     },
     "dynamo-sage-aws": {
-      "type": "sse",
-      "url": "https://d2fo97f8kuq5a7.cloudfront.net",
+      "type": "remote",
+      "url": "https://dynamodb-sage.yourdomain.com",
       "enabled": true
     }
   }
@@ -279,6 +278,19 @@ cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
 }
 ```
 
+**Remote AWS (via supergateway, SSE — for Claude Desktop):**
+
+```json
+{
+  "mcpServers": {
+    "dynamodb-sage-aws": {
+      "command": "npx",
+      "args": ["-y", "supergateway", "--sse", "https://dynamodb-sage.yourdomain.com/sse"]
+    }
+  }
+}
+```
+
 **Remote AWS (via supergateway, Streamable HTTP):**
 
 ```json
@@ -286,31 +298,13 @@ cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
   "mcpServers": {
     "dynamodb-sage-aws": {
       "command": "npx",
-      "args": ["-y", "supergateway", "--streamableHttp", "https://d2fo97f8kuq5a7.cloudfront.net", "--streamableHttpPath", "/"]
+      "args": ["-y", "supergateway", "--streamableHttp", "https://dynamodb-sage.yourdomain.com", "--streamableHttpPath", "/"]
     }
   }
 }
 ```
 
-### Any MCP Client
-
-Use Streamable HTTP transport with the URL:
-```
-https://d2fo97f8kuq5a7.cloudfront.net
-```
-
-### Test from a Browser with AI Chat (No Install)
-
-[MCP Playground](https://mcpsplayground.com) is a web-based MCP client that works entirely in the browser — no downloads, no local setup.
-
-1. Open [https://mcpsplayground.com](https://mcpsplayground.com)
-2. Click **"Add Server"** and choose **"Remote"**
-3. Enter the URL:
-   ```
-   https://d2fo97f8kuq5a7.cloudfront.net
-   ```
-4. Click **"Connect"** — the playground auto-discovers all registered tools
-5. In the chat, ask natural language questions like:
+In the chat, ask natural language questions like:
 
 **Exploration**
    - *"List all tables"*
@@ -344,7 +338,12 @@ https://d2fo97f8kuq5a7.cloudfront.net
    - *"What operations have been run recently?"*
    - *"How much read capacity did my last query use?"*
 
-The playground uses Claude / Gemini as the AI engine, so it handles tool selection and parameter filling automatically.
+### Any MCP Client
+
+Use Streamable HTTP transport with the URL:
+```
+https://dynamodb-sage.yourdomain.com
+```
 
 ### Glama MCP Inspector
 
@@ -352,7 +351,7 @@ The playground uses Claude / Gemini as the AI engine, so it handles tool selecti
 
 1. Open [Glama MCP Inspector](https://glama.ai/mcp/inspector)
 2. Click **"Add Server"**
-3. URL: `https://d2fo97f8kuq5a7.cloudfront.net`
+3. URL: `https://dynamodb-sage.yourdomain.com`
 4. Click **"Connect"**
 
 **Tool call JSON examples (paste into the Arguments field):**
@@ -445,7 +444,24 @@ This project follows **GitHub Flow**:
 
 ---
 
-## Architecture (AWS)
+## Architecture
+
+Two deployment options are available:
+
+### Lightsail (Active — $5/mo)
+
+| Component | Detail |
+|-----------|--------|
+| **Region** | `eu-north-1` |
+| **Compute** | Lightsail `nano_3_0` (2 vCPU, 0.5 GiB, 20 GB SSD) |
+| **Port** | 8080 |
+| **Transport** | Streamable HTTP (POST `/`) + SSE (`GET /sse`), health at `/health` |
+| **HTTPS** | Let's Encrypt via certbot + nginx reverse proxy |
+| **Domain** | Your own domain (A record at DNS provider) |
+| **IAM** | Dedicated IAM user with `AmazonDynamoDBFullAccess` |
+| **Logs** | `journalctl -u dynamodb-sage` |
+
+### ECS + CloudFront (Archived — Reference)
 
 | Component | Detail |
 |-----------|--------|

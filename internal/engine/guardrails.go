@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -32,6 +33,7 @@ func (g *Guardrail) ValidateSchema(tableName string, item map[string]types.Attri
 	if tableCfg == nil || !tableCfg.EnforceSchema {
 		return nil
 	}
+	errSlice := []error{}
 	for field, value := range item {
 		expectedType, exists := tableCfg.Columns[field]
 		if !exists {
@@ -39,8 +41,12 @@ func (g *Guardrail) ValidateSchema(tableName string, item map[string]types.Attri
 		}
 
 		if !g.matchType(value, expectedType) {
-			return fmt.Errorf("Field %s does not match the expected type %s", field, expectedType)
+			errSlice = append(errSlice, fmt.Errorf("field %s does not match the expected type %s: %v", field, expectedType, value))
 		}
+	}
+
+	if len(errSlice) > 0 {
+		return fmt.Errorf("schema validation failed: %v", errors.Join(errSlice...))
 	}
 	return nil
 }
@@ -90,10 +96,26 @@ func (g *Guardrail) getTableConfig(tableName string) *TableConfig {
 	return nil
 }
 
+func (g *Guardrail) ValidateReadOnlyTable(tableName string) error {
+	tableCfg := g.getTableConfig(tableName)
+	if tableCfg != nil && tableCfg.ReadOnly {
+		return fmt.Errorf("table %s is read-only", tableName)
+	}
+	return nil
+}
+
+func (g *Guardrail) ValidateCapacityUnits(cu int64) error {
+	maxThroughputIncrease := int64(g.config.RiskThresholds.MaxThroughputIncrease)
+	if cu > maxThroughputIncrease {
+		return fmt.Errorf("capacity units %d exceed limit of %d", cu, maxThroughputIncrease)
+	}
+	return nil
+}
+
 func (g *Guardrail) EnforceLimit(limit int32) (int32, string) {
 	var warning string
 	if limit <= 0 {
-		limit = g.config.GlobalLimits.DefaultLimit	
+		limit = g.config.GlobalLimits.DefaultLimit
 	}
 
 	if limit > g.config.GlobalLimits.MaxLimit {
@@ -103,10 +125,10 @@ func (g *Guardrail) EnforceLimit(limit int32) (int32, string) {
 	return limit, warning
 }
 
-func (g *Guardrail) ScrubItems(items []map[string]any) []map[string]any {
+func (g *Guardrail) ScrubItems(tableName string, items []map[string]any) []map[string]any {
 	for _, item := range items {
 		for field := range item {
-			if g.isSensitiveField(field) {
+			if g.isSensitiveField(field) || g.isPIIField(tableName, field) {
 				item[field] = fmt.Sprintf("%s:[REDACTED]", field)
 			}
 		}
@@ -121,7 +143,43 @@ func (g *Guardrail) isSensitiveField(field string) bool {
 			return true
 		}
 	}
+
 	return false
+}
+
+func (g *Guardrail) CheckTablePIIFields(tableName string, fields map[string]interface{}) []string {
+	sensitiveList := []string{}
+	for field := range fields {
+		if g.isPIIField(tableName, field) {
+			sensitiveList = append(sensitiveList, field)
+		}
+	}
+
+	return sensitiveList
+}
+
+func (g *Guardrail) isPIIField(tableName, field string) bool {
+	tableCfg := g.getTableConfig(tableName)
+	if tableCfg != nil {
+		for _, sensitiveField := range tableCfg.PIIFields {
+			if strings.EqualFold(field, sensitiveField) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (g *Guardrail) GetSensitiveFields(items map[string]interface{}) []string {
+	sensitiveList := []string{}
+	for field := range items {
+		if g.isSensitiveField(field) {
+			sensitiveList = append(sensitiveList, field)
+		}
+	}
+
+	return sensitiveList
 }
 
 func (g *Guardrail) ValidateProtectedTable(tableName string) error {
@@ -137,50 +195,49 @@ func (g *Guardrail) ValidateBatchSize(writeRequests []types.WriteRequest) error 
 	for _, eachRequest := range writeRequests {
 		size := 0
 		if eachRequest.PutRequest != nil {
-			size = g.getEstimatedSize(eachRequest.PutRequest.Item)
+			size = g.GetEstimatedSize(eachRequest.PutRequest.Item)
 		} else if eachRequest.DeleteRequest != nil {
-			size = g.getEstimatedSize(eachRequest.DeleteRequest.Key)
+			size = g.GetEstimatedSize(eachRequest.DeleteRequest.Key)
 		}
 
 		if size > MaxIndividualSize {
-			return fmt.Errorf("Item size exceeds limit of %dKB", MaxIndividualSize/1024)
+			return fmt.Errorf("item size exceeds limit of %dKB", MaxIndividualSize/1024)
 		}
 		batchSize += size
 	}
 
 	if batchSize > MaxBatchSize {
-		return fmt.Errorf("Batch size exceeds limit of %dMB", MaxBatchSize/(1024*1024))
+		return fmt.Errorf("batch size exceeds limit of %dMB", MaxBatchSize/(1024*1024))
 	}
 
 	return nil
 }
 
-func (g *Guardrail) getEstimatedSize(item map[string]types.AttributeValue) int {
+func (g *Guardrail) GetEstimatedSize(item map[string]types.AttributeValue) int {
 	size := 0
 	for key, value := range item {
 		size += g.calculateSize(key, value)
 	}
-
 	return size
 }
 
 func (g *Guardrail) GetEstimatedRCU(item map[string]types.AttributeValue, consistent bool) float64 {
-    rcu := math.Ceil(float64(g.getEstimatedSize(item)) / 4096.0)
-    if !consistent {
-        rcu = rcu * 0.5
-    }
-    if rcu < 0.5 {
-        return 0.5 // minimum is 0.5 RCU for eventually consistent
-    }
-    return rcu
+	rcu := math.Ceil(float64(g.GetEstimatedSize(item)) / 4096.0)
+	if !consistent {
+		rcu = rcu * 0.5
+	}
+	if rcu < 0.5 {
+		return 0.5 // minimum is 0.5 RCU for eventually consistent
+	}
+	return rcu
 }
 
 func (g *Guardrail) GetEstimatedWCU(item map[string]types.AttributeValue) float64 {
-    wcu := math.Ceil(float64(g.getEstimatedSize(item)) / 1024.0)
-    if wcu < 1.0 {
-        return 1.0
-    }
-    return wcu
+	wcu := math.Ceil(float64(g.GetEstimatedSize(item)) / 1024.0)
+	if wcu < 1.0 {
+		return 1.0
+	}
+	return wcu
 }
 
 func (g *Guardrail) calculateSize(key string, value types.AttributeValue) int {
@@ -216,7 +273,7 @@ func (g *Guardrail) calculateSize(key string, value types.AttributeValue) int {
 		}
 	case *types.AttributeValueMemberM:
 		// Recurse into nested map
-		size += g.getEstimatedSize(v.Value)
+		size += g.GetEstimatedSize(v.Value)
 	}
 
 	return size

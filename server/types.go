@@ -10,7 +10,8 @@ type DescribeTableArgs struct {
 }
 
 type DeleteTableArgs struct {
-	TableName string `json:"tableName"`
+	TableName    string `json:"tableName"`
+	Confirmation *bool  `json:"confirmation"`
 }
 
 type ScanTableArgs struct {
@@ -21,11 +22,13 @@ type ScanTableArgs struct {
 	Limit                     int32          `json:"limit"`
 	ExclusiveStartKey         map[string]any `json:"exclusiveStartKey"`
 	ConsistentRead            *bool          `json:"consistentRead"`
+	Confirmation              *bool          `json:"confirmation"`
 }
 
 type PutItemArgs struct {
-	TableName string         `json:"tableName"`
-	Item      map[string]any `json:"item"`
+	TableName    string         `json:"tableName"`
+	Item         map[string]any `json:"item"`
+	Confirmation *bool          `json:"confirmation"`
 }
 
 type QueryTableArgs struct {
@@ -42,16 +45,19 @@ type QueryTableArgs struct {
 type BatchPutItemsArgs struct {
 	TableName string           `json:"tableName"`
 	Items     []map[string]any `json:"items"`
+	Confirmation              *bool          `json:"confirmation"`
 }
 
 type BatchDeleteItemsArgs struct {
-	TableName string           `json:"tableName"`
-	Keys      []map[string]any `json:"keys"`
+	TableName    string           `json:"tableName"`
+	Keys         []map[string]any `json:"keys"`
+	Confirmation *bool            `json:"confirmation"`
 }
 
 type DeleteItemArgs struct {
-	TableName string         `json:"tableName"`
-	Key       map[string]any `json:"key"`
+	TableName    string         `json:"tableName"`
+	Key          map[string]any `json:"key"`
+	Confirmation *bool          `json:"confirmation"`
 }
 
 type GetItemArgs struct {
@@ -67,11 +73,13 @@ type UpdateItemArgs struct {
 	ReturnValue               string            `json:"returnValues"`
 	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames"`
 	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues"`
+	Confirmation              *bool             `json:"confirmation"`
 }
 
 type BatchGetItemArgs struct {
-	TableName string           `json:"tableName"`
-	Keys      []map[string]any `json:"keys"`
+	TableName    string           `json:"tableName"`
+	Keys         []map[string]any `json:"keys"`
+	Confirmation *bool            `json:"confirmation"`
 }
 
 type ReadAuditLogsArgs struct {
@@ -97,6 +105,7 @@ type UpdateTableArgs struct {
 	BillingMode                 string                             `json:"billingMode"`
 	ProvisionedThroughput       *ProvisionedThroughput             `json:"provisionedThroughput,omitempty"`
 	AttributeDefinitions        []AttributeDefinition              `json:"attributeDefinitions,omitempty"`
+	Confirmation                *bool                              `json:"confirmation"`
 }
 
 type GSI struct {

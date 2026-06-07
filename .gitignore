@@ -42,14 +42,13 @@ Thumbs.db
 internal/risk/analyzer.go
 
 # Terraform
-terraform/.terraform/
-terraform/*.tfstate
-terraform/*.tfstate.backup
-terraform/dynamodb.tf
+terraform/**/.terraform/
+terraform/**/terraform.tfstate
+terraform/**/terraform.tfstate.backup
 
-# Windsurf settings
-.windsurfignore
-.windsurfrules
+# Lightsail SSH keys
+keys/
+
 
 # Dependencies
 # (Uncomment if you use vendor directory)

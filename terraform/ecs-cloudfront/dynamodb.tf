@@ -6,9 +6,9 @@
 # Users Table
 # ----------------------------------------------------------------------------
 resource "aws_dynamodb_table" "users" {
-  name           = "Users"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "user_id"
+  name         = "Users"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "user_id"
 
   attribute {
     name = "user_id"
@@ -35,9 +35,9 @@ resource "aws_dynamodb_table" "users" {
 # Orders Table
 # ----------------------------------------------------------------------------
 resource "aws_dynamodb_table" "orders" {
-  name           = "Orders"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "customer_id"
+  name         = "Orders"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "customer_id"
 
   attribute {
     name = "customer_id"

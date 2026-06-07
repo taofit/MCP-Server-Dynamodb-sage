@@ -66,7 +66,7 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 		return srv.errorResult(fmt.Sprintf("Error when unmarshaling items: %v", err)), nil, nil
 	}
 	itemsText := fmt.Sprintf("DynamoDB Table: \"%s\"\nQueried %d items from table %s:", args.TableName, len(items), args.TableName)
-	scrubbedItems := srv.guardrail.ScrubItems(items)
+	scrubbedItems := srv.guardrail.ScrubItems(args.TableName, items)
 	for i, item := range scrubbedItems {
 		itemJson, _ := json.Marshal(item)
 		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJson))
@@ -93,6 +93,12 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 }
 
 func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *PutItemArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		return srv.errorResult(err.Error()), nil, nil
+	}
+	if len(args.Item) == 0 {
+		return srv.errorResult(fmt.Sprintf("Item to put into table %s cannot be empty", args.TableName)), nil, nil
+	}
 	// Convert the plain Go map into a map of DynamoDB AttributeValues
 	av, err := attributevalue.MarshalMap(args.Item)
 	if err != nil {
@@ -260,7 +266,7 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 
 	// For a simple text representation of the items
 	itemsText := fmt.Sprintf("⚠️ Warning: Scan reads the entire table and is costly in RCU. Consider using query_table with a GSI for better performance and lower cost.\n\nDynamoDB Table: \"%s\"\nScanned %d items from table %s:", args.TableName, len(items), args.TableName)
-	scrubbedItems := srv.guardrail.ScrubItems(items)
+	scrubbedItems := srv.guardrail.ScrubItems(args.TableName, items)
 	for i, item := range scrubbedItems {
 		itemJson, _ := json.Marshal(item)
 		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJson))
@@ -286,6 +292,9 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 }
 
 func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchPutItemsArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		return srv.errorResult(err.Error()), nil, nil
+	}
 	if len(args.Items) == 0 {
 		return srv.errorResult(fmt.Sprintf("No items to put into table %s", args.TableName)), nil, nil
 	}
@@ -358,6 +367,10 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 
 func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchDeleteItemsArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
+	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
@@ -470,7 +483,7 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	attributes := map[string]any{}
 	attributevalue.UnmarshalMap(output.Attributes, &attributes)
 
-	scrubbed := srv.guardrail.ScrubItems([]map[string]any{attributes})
+	scrubbed := srv.guardrail.ScrubItems(args.TableName, []map[string]any{attributes})
 	itemJson, _ := json.Marshal(scrubbed[0])
 	keyJson, _ := json.Marshal(args.Key)
 
@@ -503,21 +516,29 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 	}
 	item := map[string]any{}
 	attributevalue.UnmarshalMap(output.Item, &item)
-	keyJson, _ := json.Marshal(args.Key)
+	keyJSON, _ := json.Marshal(args.Key)
 
 	if len(item) == 0 {
-		return srv.errorResult(fmt.Sprintf("Item with key %s not found in table %s", string(keyJson), args.TableName)), nil, nil
+		return srv.errorResult(fmt.Sprintf("Item with key %s not found in table %s", string(keyJSON), args.TableName)), nil, nil
 	}
 
-	scrubbedItem := srv.guardrail.ScrubItems([]map[string]any{item})[0]
-	itemJson, _ := json.Marshal(scrubbedItem)
+	scrubbedItem := srv.guardrail.ScrubItems(args.TableName, []map[string]any{item})[0]
+	itemJSON, _ := json.Marshal(scrubbedItem)
 
 	srv.sendAuditLog("get_item", args.TableName, "RCU", output.ConsumedCapacity, nil)
 
-	return srv.successResult(fmt.Sprintf("Successfully got item with key %s from table %s: %s", string(keyJson), args.TableName, string(itemJson))), nil, nil
+	return srv.successResult(fmt.Sprintf("Successfully got item with key %s from table %s: %s", string(keyJSON), args.TableName, string(itemJSON))), nil, nil
 }
 
 func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, args *UpdateItemArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
+	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
 	if args.Key == nil {
 		return srv.errorResult(fmt.Sprintf("Error when updating item for table: %s key is required", args.TableName)), nil, nil
 	}
@@ -564,19 +585,21 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	srv.sendAuditLog("update_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
 	var attributes map[string]any
-	var scrubbedAttributes []map[string]any
+	var scrubbedItem map[string]any
 	if len(output.Attributes) != 0 {
 		attributevalue.UnmarshalMap(output.Attributes, &attributes)
-		scrubbedAttributes = srv.guardrail.ScrubItems([]map[string]any{attributes})
+		scrubbedItem = srv.guardrail.ScrubItems(args.TableName,[]map[string]any{attributes})[0]
 	}
-	var attributesMsg = ""
-	if len(scrubbedAttributes) != 0 {
-		scrubbedAttributeJson, _ := json.Marshal(scrubbedAttributes[0])
-		attributesMsg += fmt.Sprintf(", Attributes: %s", scrubbedAttributeJson)
-	}
-	keyJson, _ := json.Marshal(args.Key)
 
-	return srv.successResult(fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJson), args.TableName, attributesMsg)), nil, nil
+	keyJSON, _ := json.Marshal(args.Key)
+	attributesMsg := ""
+	if len(scrubbedItem) > 0 {
+		scrubbedAttributeJSON, _ := json.Marshal(scrubbedItem)
+		attributesMsg = fmt.Sprintf(", Attributes: %s", string(scrubbedAttributeJSON))
+	}
+
+
+	return srv.successResult(fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJSON), args.TableName, attributesMsg)), nil, nil
 }
 
 func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchGetItemArgs) (*mcp.CallToolResult, any, error) {
@@ -588,8 +611,8 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 	existingKeys := make(map[string]bool)
 
 	for _, key := range args.Keys {
-		keyJson, _ := json.Marshal(key)
-		keyStr := string(keyJson)
+		keyJSON, _ := json.Marshal(key)
+		keyStr := string(keyJSON)
 		if existingKeys[keyStr] {
 			continue
 		}
@@ -661,8 +684,8 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 				failedList = append(failedList, keyAVTrans)
 			}
 		}
-		failedJson, _ := json.Marshal(failedList)
-		unprocessedMsg = fmt.Sprintf(", Warning: %d keys were not processed (provisioned throughput exceeded). Failed keys: %s", len(failedList), string(failedJson))
+		failedJSON, _ := json.Marshal(failedList)
+		unprocessedMsg = fmt.Sprintf(", Warning: %d keys were not processed (provisioned throughput exceeded). Failed keys: %s", len(failedList), string(failedJSON))
 	}
 	scrubbedItems := []map[string]any{}
 	for _, item := range outputResponse {
@@ -671,7 +694,7 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 		scrubbedItems = append(scrubbedItems, scrubbedItem)
 	}
 
-	scrubbedItems = srv.guardrail.ScrubItems(scrubbedItems)
+	scrubbedItems = srv.guardrail.ScrubItems(args.TableName, scrubbedItems)
 
 	itemStrings := []string{}
 	for _, item := range scrubbedItems {
@@ -679,8 +702,8 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 		itemStrings = append(itemStrings, string(itemTrans))
 	}
 
-	itemsJson, _ := json.Marshal(itemStrings)
-	return srv.successResult(fmt.Sprintf("Successfully batch get %d items from table %s: %s%s", len(scrubbedItems), args.TableName, string(itemsJson), unprocessedMsg)), nil, nil
+	itemsJSON, _ := json.Marshal(itemStrings)
+	return srv.successResult(fmt.Sprintf("Successfully batch get %d items from table %s: %s%s", len(scrubbedItems), args.TableName, string(itemsJSON), unprocessedMsg)), nil, nil
 }
 
 func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRequest, args *CreateTableArgs) (*mcp.CallToolResult, any, error) {
@@ -776,10 +799,16 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	if args.ProvisionedThroughput != nil && (args.ProvisionedThroughput.WriteCapacityUnits > 0 || args.ProvisionedThroughput.ReadCapacityUnits > 0 || args.BillingMode == string(types.BillingModeProvisioned)) {
 		ru := args.ProvisionedThroughput.ReadCapacityUnits
-		if ru == 0 {
+		wu := args.ProvisionedThroughput.WriteCapacityUnits
+		if err := srv.guardrail.ValidateCapacityUnits(ru); err != nil {
+			return srv.errorResult(fmt.Sprintf("UpdateTable: %v", err)), nil, nil
+		}
+		if err := srv.guardrail.ValidateCapacityUnits(wu); err != nil {
+			return srv.errorResult(fmt.Sprintf("UpdateTable: %v", err)), nil, nil
+		}
+		if 	ru == 0 {
 			ru = 1
 		}
-		wu := args.ProvisionedThroughput.WriteCapacityUnits
 		if wu == 0 {
 			wu = 1
 		}
@@ -788,18 +817,18 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 			WriteCapacityUnits: aws.Int64(wu),
 		}
 	}
-    if len(args.GlobalSecondaryIndexUpdates) > 0 {
-        // Filter out empty update structs where all actions are nil
-        var realUpdates []types.GlobalSecondaryIndexUpdate
-        for _, upd := range args.GlobalSecondaryIndexUpdates {
-            if upd.Create != nil || upd.Update != nil || upd.Delete != nil {
-                realUpdates = append(realUpdates, upd)
-            }
-        }
-        if len(realUpdates) > 0 {
-            input.GlobalSecondaryIndexUpdates = realUpdates
-        }
-    }
+	if len(args.GlobalSecondaryIndexUpdates) > 0 {
+		// Filter out empty update structs where all actions are nil
+		var realUpdates []types.GlobalSecondaryIndexUpdate
+		for _, upd := range args.GlobalSecondaryIndexUpdates {
+			if upd.Create != nil || upd.Update != nil || upd.Delete != nil {
+				realUpdates = append(realUpdates, upd)
+			}
+		}
+		if len(realUpdates) > 0 {
+			input.GlobalSecondaryIndexUpdates = realUpdates
+		}
+	}
 
 	if len(args.AttributeDefinitions) > 0 {
 		var attriList []types.AttributeDefinition
@@ -871,8 +900,8 @@ func (srv *Server) readAuditLogs(ctx context.Context, req *mcp.CallToolRequest, 
 		return srv.errorResult(fmt.Sprintf("Error when reading audit logs: %v", err)), nil, nil
 	}
 
-	logsJson, _ := json.Marshal(logs)
-	return srv.successResult(fmt.Sprintf("Successfully read %d audit logs: %s", len(logs), string(logsJson))), nil, nil
+	logsJSON, _ := json.Marshal(logs)
+	return srv.successResult(fmt.Sprintf("Successfully read %d audit logs: %s", len(logs), string(logsJSON))), nil, nil
 }
 
 func (srv *Server) validateSchema(tableName string, av map[string]types.AttributeValue) *mcp.CallToolResult {

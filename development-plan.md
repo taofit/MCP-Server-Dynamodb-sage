@@ -88,6 +88,15 @@ MCP Client (Claude/Cursor/etc)
     - `testing/integration_test.go` — real AWS integration tests
     - `testing/mocks.go` — unit test mocks
 
+12. Schema Advisor — analyze table schemas and recommend improvements:
+    - Evaluate partition key cardinality (detect hot keys / low-cardinality PKs)
+    - Suggest sort keys for common access patterns (e.g., time-based queries)
+    - Recommend GSIs/LSIs based on observed or described query patterns
+    - Detect missing/bad attribute types (e.g., storing numbers as strings)
+    - Warn on over-provisioned GSIs or unused indexes
+    - Exposed as an MCP tool `suggest_table_schema` (describe-table → analysis → recommendations)
+    - Fits the "sage/advisor" theme — not just preventing bad ops, but proactively giving design advice
+
 **Tech stack recommendation (Go, since your workspace is Go):**
 
 - [`mark3labs/mcp-go`](https://github.com/mark3labs/mcp-go) — MCP server SDK for Go
