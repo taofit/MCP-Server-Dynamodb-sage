@@ -224,6 +224,8 @@ aws ecs describe-services --cluster dynamodb-sage-cluster --service dynamodb-sag
 
 > **Public demo server** available at `https://dynamodb-sage.hzcentre.com` — try it directly with any MCP client by replacing the URL `https://dynamodb-sage.yourdomain.com` with `https://dynamodb-sage.hzcentre.com` in the json configue file of the MCP client (e.g. `opencode.json`, `claude_desktop_config.json`, etc.). Guardrails and risk analysis protect against abuse.
 
+> ⚠️ **Important**: The risk analyzer may return warnings for expensive or destructive operations (e.g. large scans, batch deletes, schema changes). Some MCP clients (including Claude) may auto-confirm these warnings without asking you. To prevent this, tell the LLM explicitly: *"If the server returns a risk warning, show it to me and ask for my confirmation before proceeding. Never auto-confirm."*
+
 ### opencode
 
 Add to `opencode.json` in your project root:
