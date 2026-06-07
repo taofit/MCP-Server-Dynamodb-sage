@@ -150,7 +150,7 @@ terraform output static_ip
 2. Run the deploy script which sets up nginx, obtains certs, and deploys the app:
 
 ```bash
-bash scripts/deploy.sh dynamodb-sage.hzcentre.com
+bash scripts/deploy.sh dynamodb-sage.yourdomain.com
 ```
 
 **Deploy code changes:**
@@ -164,7 +164,7 @@ ssh -i keys/lightsail.pem ubuntu@<IP> sudo systemctl restart dynamodb-sage
 **Verify health:**
 
 ```bash
-curl https://dynamodb-sage.hzcentre.com/health
+curl https://dynamodb-sage.yourdomain.com/health
 # → ok
 ```
 
@@ -229,7 +229,7 @@ Add to `opencode.json` in your project root:
     },
     "dynamo-sage-aws": {
       "type": "remote",
-      "url": "https://dynamodb-sage.hzcentre.com",
+      "url": "https://dynamodb-sage.yourdomain.com",
       "enabled": true
     }
   }
@@ -287,7 +287,7 @@ cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
   "mcpServers": {
     "dynamodb-sage-aws": {
       "command": "npx",
-      "args": ["-y", "supergateway", "--sse", "https://dynamodb-sage.hzcentre.com/sse"]
+      "args": ["-y", "supergateway", "--sse", "https://dynamodb-sage.yourdomain.com/sse"]
     }
   }
 }
@@ -300,7 +300,7 @@ cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
   "mcpServers": {
     "dynamodb-sage-aws": {
       "command": "npx",
-      "args": ["-y", "supergateway", "--streamableHttp", "https://dynamodb-sage.hzcentre.com", "--streamableHttpPath", "/"]
+      "args": ["-y", "supergateway", "--streamableHttp", "https://dynamodb-sage.yourdomain.com", "--streamableHttpPath", "/"]
     }
   }
 }
@@ -344,7 +344,7 @@ In the chat, ask natural language questions like:
 
 Use Streamable HTTP transport with the URL:
 ```
-https://dynamodb-sage.hzcentre.com
+https://dynamodb-sage.yourdomain.com
 ```
 
 ### Glama MCP Inspector
@@ -353,7 +353,7 @@ https://dynamodb-sage.hzcentre.com
 
 1. Open [Glama MCP Inspector](https://glama.ai/mcp/inspector)
 2. Click **"Add Server"**
-3. URL: `https://dynamodb-sage.hzcentre.com`
+3. URL: `https://dynamodb-sage.yourdomain.com`
 4. Click **"Connect"**
 
 **Tool call JSON examples (paste into the Arguments field):**
