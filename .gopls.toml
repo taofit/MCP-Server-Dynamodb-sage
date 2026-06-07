@@ -1,0 +1,70 @@
+# gopls configuration file
+# See https://github.com/golang/tools/blob/master/gopls/doc/settings.md
+
+# Enable all diagnostics
+diagnostics = true
+
+# Enable staticcheck for additional linting
+staticcheck = true
+
+# Enable all analyzers
+[analyses]
+asmdecl = true
+assign = true
+atomic = true
+bools = true
+buildtag = true
+cgocall = true
+composites = true
+copylocks = true
+deepequalerrors = true
+embed = true
+errorsas = true
+fieldalignment = true
+httpresponse = true
+ifaceassert = true
+loopclosure = true
+lostcancel = true
+nilfunc = true
+nilness = true
+printf = true
+shadow = true
+shift = true
+simplifycompositelit = true
+simplifyrange = true
+simplifyslice = true
+sortslice = true
+stdmethods = true
+stringintconv = true
+structtag = true
+testinggoroutine = true
+tests = true
+timeformat = true
+unmarshal = true
+unreachable = true
+unsafeptr = true
+unusedresult = true
+unusedwrite = true
+useany = true
+
+# UI settings
+[ui]
+completion.usePlaceholders = true
+completion.completeUnimported = true
+completion.experimentalPostfixCompletions = true
+signatureHelp.documentation = true
+hoverKind = "FullDocumentation"
+semanticTokens = true
+codelens.references = true
+codelens.implementations = true
+codelens.test = true
+
+# Formatting settings
+[formatting.gofumpt]
+enabled = false  # Disable gofumpt if not installed
+
+# Build settings
+[build]
+buildFlags = []
+directoryFilters = ["-node_modules", "-.git", "-.vscode"]
+expandWorkspaceToModule = true

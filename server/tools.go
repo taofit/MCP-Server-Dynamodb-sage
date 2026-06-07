@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -25,7 +27,7 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to describe",
+					"description": "The name of the table to describe. Example users, orders",
 				},
 			},
 			"required": []string{"tableName"},
@@ -40,11 +42,11 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to scan",
+					"description": "The name of the table to scan. Example users, orders",
 				},
 				"filterExpression": map[string]any{
 					"type":        "string",
-					"description": "The filter expression for the scan",
+					"description": "The filter expression for the scan. Example #attr = :val",
 				},
 				"projectionExpression": map[string]any{
 					"type":        "string",
@@ -68,6 +70,11 @@ func (srv *Server) addTools() {
 					"description": "If true, a strongly consistent read is used. Default is false (eventually consistent). Consistent reads consume more capacity units.",
 					"default":     false,
 				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the scan operation",
+					"default":     false,
+				},
 			},
 			"required": []string{"tableName"},
 		},
@@ -81,16 +88,21 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to put an item into",
+					"description": "The name of the table to put an item into. Example users, orders",
 				},
 				"item": map[string]any{
 					"type":        "object",
-					"description": "The item to put into the table, in JSON format",
+					"description": "The item to put into the table as a plain JSON object. Example {\"id\": 1, \"name\": \"value\"}",
+				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the put item operation",
+					"default":     false,
 				},
 			},
 			"required": []string{"tableName", "item"},
 		},
-	}, srv.putItem)
+	}, withRiskAnalysis(srv, srv.putItem))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name: "query_table",
@@ -117,7 +129,7 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to query",
+					"description": "The name of the table to query. Example users, orders",
 				},
 				"indexName": map[string]any{
 					"type":        "string",
@@ -162,19 +174,24 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table where new items go",
+					"description": "The name of the table where new items go. Example users, orders",
 				},
 				"items": map[string]any{
 					"type":        "array",
-					"description": "The items put into the table in JSON format",
+					"description": "The items to put into the table as plain JSON objects. Example [{\"id\": 1, \"name\": \"val1\"}, {\"id\": 2, \"name\": \"val2\"}]",
 					"items": map[string]any{
 						"type": "object",
 					},
 				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the bat	ch put operation",
+					"default":     false,
+				},
 			},
 			"required": []string{"tableName", "items"},
 		},
-	}, srv.batchPutItems)
+	}, withRiskAnalysis(srv, srv.batchPutItems))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "batch_delete_items",
@@ -184,19 +201,24 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to delete the items from",
+					"description": "The name of the table to delete the items from. Example users, orders",
 				},
 				"keys": map[string]any{
 					"type":        "array",
-					"description": "The keys of items to be deleted from the table",
+					"description": "The primary keys of items to be deleted as plain JSON objects. Example [{\"id\": 1}, {\"id\": 2}]",
 					"items": map[string]any{
 						"type": "object",
 					},
 				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the batch delete operation",
+					"default":     false,
+				},
 			},
 			"required": []string{"tableName", "keys"},
 		},
-	}, srv.batchDeleteItems)
+	}, withRiskAnalysis(srv, srv.batchDeleteItems))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "delete_item",
@@ -206,16 +228,21 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to delete an item from",
+					"description": "The name of the table to delete an item from. Example users, orders",
 				},
 				"key": map[string]any{
 					"type":        "object",
-					"description": "The primary key of the item to delete in JSON format",
+					"description": "The primary key of the item to delete as a plain JSON object. Example {\"id\": 1}",
+				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the delete operation",
+					"default":     false,
 				},
 			},
 			"required": []string{"tableName", "key"},
 		},
-	}, srv.deleteItem)
+	}, withRiskAnalysis(srv, srv.deleteItem))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "get_item",
@@ -225,11 +252,11 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to get an item from",
+					"description": "The name of the table to get an item from. Example users, orders",
 				},
 				"key": map[string]any{
 					"type":        "object",
-					"description": "The primay key of the item to get in JSON format",
+					"description": "The primary key of the item to get as a plain JSON object. Example {\"id\": 1}",
 				},
 			},
 			"required": []string{"tableName", "key"},
@@ -244,31 +271,31 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to update an item from",
+					"description": "The name of the table to update an item from. Example users, orders",
 				},
 				"key": map[string]any{
 					"type":        "object",
-					"description": "The primary key of the item to update in JSON format",
+					"description": "The primary key of the item to update as a plain JSON object. Example {\"id\": 1, \"name\": \"Reggie\"}",
 				},
 				"updateExpression": map[string]any{
 					"type":        "string",
-					"description": "the expression to update",
+					"description": "The update expression. Example SET #attr = :val",
 				},
 				"expressionAttributeNames": map[string]any{
 					"type":        "object",
-					"description": "the expression attribute names for the update",
+					"description": "the expression attribute names for the update. Example {\":attr\": \"attribute_name\"}",
 				},
 				"expressionAttributeValues": map[string]any{
 					"type":        "object",
-					"description": "the expression attribute values for the update",
+					"description": "the expression attribute values for the update. Example {\":val\":{\"S\":\"active\"}}",
 				},
 				"conditionExpression": map[string]any{
 					"type":        "string",
-					"description": "A optional condition to evaluate before updating",
+					"description": "An optional condition to evaluate before updating. Example attribute_exists(#attr)",
 				},
 				"returnValues": map[string]any{
 					"type":        "string",
-					"description": "the return values for the update",
+					"description": "The return values for the update. Choose from NONE, ALL_OLD, ALL_NEW, UPDATED_OLD, UPDATED_NEW",
 					"enum": []string{
 						"NONE",
 						"ALL_OLD",
@@ -277,32 +304,42 @@ func (srv *Server) addTools() {
 						"UPDATED_NEW",
 					},
 				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the update operation",
+					"default":     false,
+				},
 			},
 			"required": []string{"tableName", "key", "updateExpression"},
 		},
-	}, srv.updateItem)
+	}, withRiskAnalysis(srv, srv.updateItem))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
-		Name:        "batch_get_item",
+		Name:        "batch_get_items",
 		Description: "Batch get item from the table using primary key",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to batch get items from",
+					"description": "The name of the table to batch get items from. Example users, orders",
 				},
 				"keys": map[string]any{
 					"type":        "array",
-					"description": "The primary keys of the items to batch get in JSON format",
+					"description": "The primary keys of the items to batch get as plain JSON objects. Example [{\"id\": 1}, {\"id\": 2}]",
 					"items": map[string]any{
 						"type": "object",
 					},
 				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the batch get operation",
+					"default":     false,
+				},
 			},
 			"required": []string{"tableName", "keys"},
 		},
-	}, srv.batchGetItems)
+	}, withRiskAnalysis(srv, srv.batchGetItems))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "read_audit_logs",
@@ -336,7 +373,7 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to create",
+					"description": "The name of the table to create. Example users, orders",
 				},
 				"keySchema": map[string]any{
 					"type":        "array",
@@ -455,12 +492,17 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to delete",
+					"description": "The name of the table to delete. Example users, orders",
+				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the delete operation",
+					"default":     false,
 				},
 			},
 			"required": []string{"tableName"},
 		},
-	}, srv.deleteTable)
+	}, withRiskAnalysis(srv, srv.deleteTable))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "update_table",
@@ -470,7 +512,12 @@ func (srv *Server) addTools() {
 			"properties": map[string]any{
 				"tableName": map[string]any{
 					"type":        "string",
-					"description": "The name of the table to update",
+					"description": "The name of the table to update. Example users, orders",
+				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the update operation",
+					"default":     false,
 				},
 				"provisionedThroughput": map[string]any{
 					"type": "object",
@@ -579,29 +626,66 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName"},
 		},
-	}, srv.updateTable)
+	}, withRiskAnalysis(srv, srv.updateTable))
 }
 
 func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
 	return func(ctx context.Context, req *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
-		assessment, err := srv.riskAnalyzer.Analyze(ctx, req)
+		m, err := srv.ConvertToMap(input)
 		if err != nil {
 			var empty Out
-			return srv.formatWarningResult(fmt.Sprintf("risk analysis failed: %s", err), req.Params.Name), empty, nil
+			return srv.formatWarningResult(fmt.Sprintf("failed to convert input to map: %s", err), req.Params.Name, m), empty, nil
 		}
-		if assessment.IsHighRisk() {
+
+		reason, err := srv.checkRisk(ctx, req, m)
+		if err != nil {
 			var empty Out
-			return srv.formatWarningResult(fmt.Sprintf("high risk detected: %s", assessment.Reason), req.Params.Name), empty, nil
+			return srv.formatWarningResult(fmt.Sprintf("risk analysis failed: %s", err), req.Params.Name, m), empty, nil
 		}
+
+		if reason != "" {
+			var empty Out
+			return srv.formatWarningResult(fmt.Sprintf("detected risk: %s", reason), req.Params.Name, m), empty, nil
+		}
+
 		return handler(ctx, req, input)
 	}
 }
 
-func (srv *Server) formatWarningResult(reason string, operation string) *mcp.CallToolResult {
+func (srv *Server) checkRisk(ctx context.Context, req *mcp.CallToolRequest, m map[string]any) (string, error) {
+	if confirmed, _ := m["confirmation"].(bool); confirmed {
+		return "", nil
+	}
+
+	assessment, err := srv.riskAnalyzer.Analyze(ctx, req)
+	if err != nil {
+		return "", err
+	}
+
+	if assessment.IsRisk() {
+		return assessment.Reason, nil
+	}
+
+	return "", nil
+}
+
+func (srv *Server) formatWarningResult(reason string, operation string, input map[string]interface{}) *mcp.CallToolResult {
+	tableName := ""
+	if tName, ok := input["tableName"].(string); ok {
+		tableName = tName
+	}
 	msg := fmt.Sprintf("⚠️ **WARNING** ⚠️\n\n"+
-		"**Reason:** %s\n"+
-		"**Calculated Cost/Impact:** High Resource Consumption.\n\n"+
-		"To complete this action, please explicitly reply with: **'Confirm execution of %s'**.", reason, operation)
+		"**Operation:** %s\n"+
+		"**Table:** %s\n"+
+		"**Reason:** %s\n\n"+
+		"**INSTRUCTIONS FOR AI:** when I return the warning, you need to ask user to confirm if they want to continue, call %s again with:\n"+
+		"```json\n"+
+		"{\n"+
+		"  \"tableName\": \"%s\",\n"+
+		"  \"confirmation\": true\n"+
+		"}\n"+
+		"```",
+		operation, tableName, reason, operation, tableName)
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
@@ -611,4 +695,18 @@ func (srv *Server) formatWarningResult(reason string, operation string) *mcp.Cal
 		},
 		IsError: false,
 	}
+}
+
+func (srv *Server) ConvertToMap(input any) (map[string]any, error) {
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	decoder := json.NewDecoder(bytes.NewBuffer(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }

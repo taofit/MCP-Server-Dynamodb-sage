@@ -27,7 +27,7 @@ tables:
       user_name: "S"
       age: "N"
       is_active: "BOOL"
-  
+
   - name: "Orders"
     pii_fields: ["customer_name", "shipping_address"]
     read_only: false
@@ -37,8 +37,23 @@ tables:
       customer_name: "S"
       shipping_address: "S"
 
+  - name: "Human"
+    pii_fields: ["religion"]
+    read_only: false
+    enforce_schema: true
+    columns:
+      id: "N"
+      name: "S"
+      religion: "S"
+      price: "N"
+
 risk_thresholds:
-  table_size_mb: 10        # warn if table > 10MB
-  scan_cost_usd: 0.05      # warn if scan costs > $0.05
-  bulk_delete_count: 50    # warn if deleting > 50 items
-    
+  table_size_mb: 10 # warn if table > 10MB
+  scan_cost_usd: 0.05 # warn if scan costs > $0.05
+  # Maximum number of items allowed in a single BatchDeleteItem request.
+  # Raising this value increases cost and data-loss risk.
+  batch_delete_count: 100 # warn if deleting > 100 items
+  batch_get_count: 100 # warn if getting > 100 items
+  batch_put_count: 100 # warn if putting > 100 items
+  max_throughput_increase: 2000
+  update_expression_depth: 5
