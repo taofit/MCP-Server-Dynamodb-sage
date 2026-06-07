@@ -150,7 +150,7 @@ terraform output static_ip
 2. Run the deploy script which sets up nginx, obtains certs, and deploys the app:
 
 ```bash
-bash scripts/deploy.sh dynamodb-sage.yourdomain.com
+bash scripts/deploy.sh dynamodb-sage.hzcentre.com
 ```
 
 **Deploy code changes:**
@@ -164,7 +164,7 @@ ssh -i keys/lightsail.pem ubuntu@<IP> sudo systemctl restart dynamodb-sage
 **Verify health:**
 
 ```bash
-curl https://dynamodb-sage.yourdomain.com/health
+curl https://dynamodb-sage.hzcentre.com/health
 # → ok
 ```
 
@@ -213,6 +213,8 @@ aws ecs describe-services --cluster dynamodb-sage-cluster --service dynamodb-sag
 
 ## Connecting MCP Clients
 
+> **Public demo server** available at `https://dynamodb-sage.hzcentre.com` — try it directly with any MCP client. Guardrails and risk analysis protect against abuse.
+
 ### opencode
 
 Add to `opencode.json` in your project root:
@@ -227,7 +229,7 @@ Add to `opencode.json` in your project root:
     },
     "dynamo-sage-aws": {
       "type": "remote",
-      "url": "https://dynamodb-sage.yourdomain.com",
+      "url": "https://dynamodb-sage.hzcentre.com",
       "enabled": true
     }
   }
@@ -285,7 +287,7 @@ cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
   "mcpServers": {
     "dynamodb-sage-aws": {
       "command": "npx",
-      "args": ["-y", "supergateway", "--sse", "https://dynamodb-sage.yourdomain.com/sse"]
+      "args": ["-y", "supergateway", "--sse", "https://dynamodb-sage.hzcentre.com/sse"]
     }
   }
 }
@@ -298,7 +300,7 @@ cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
   "mcpServers": {
     "dynamodb-sage-aws": {
       "command": "npx",
-      "args": ["-y", "supergateway", "--streamableHttp", "https://dynamodb-sage.yourdomain.com", "--streamableHttpPath", "/"]
+      "args": ["-y", "supergateway", "--streamableHttp", "https://dynamodb-sage.hzcentre.com", "--streamableHttpPath", "/"]
     }
   }
 }
@@ -342,7 +344,7 @@ In the chat, ask natural language questions like:
 
 Use Streamable HTTP transport with the URL:
 ```
-https://dynamodb-sage.yourdomain.com
+https://dynamodb-sage.hzcentre.com
 ```
 
 ### Glama MCP Inspector
@@ -351,7 +353,7 @@ https://dynamodb-sage.yourdomain.com
 
 1. Open [Glama MCP Inspector](https://glama.ai/mcp/inspector)
 2. Click **"Add Server"**
-3. URL: `https://dynamodb-sage.yourdomain.com`
+3. URL: `https://dynamodb-sage.hzcentre.com`
 4. Click **"Connect"**
 
 **Tool call JSON examples (paste into the Arguments field):**
