@@ -164,10 +164,12 @@ terraform output static_ip
 
 **Deploy code changes:**
 
+Also keep `config.yaml` in sync — it's loaded at runtime:
+
 ```bash
 GOOS=linux GOARCH=amd64 go build -o /tmp/dynamodb-sage .
-scp -i keys/lightsail.pem /tmp/dynamodb-sage ubuntu@<IP>:/tmp/dynamodb-sage
-ssh -i keys/lightsail.pem ubuntu@<IP> sudo systemctl restart dynamodb-sage
+scp -i keys/lightsail.pem /tmp/dynamodb-sage config.yaml ubuntu@<IP>:/tmp/
+ssh -i keys/lightsail.pem ubuntu@<IP> "sudo cp /tmp/config.yaml /opt/dynamodb-sage/config.yaml && sudo systemctl restart dynamodb-sage"
 ```
 
 **Verify health:**
