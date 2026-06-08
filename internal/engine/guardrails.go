@@ -137,6 +137,17 @@ func (g *Guardrail) ScrubItems(tableName string, items []map[string]any) []map[s
 	return items
 }
 
+func (g *Guardrail) GetTags(tagName string) []string {
+	if g.config.ProtectedTags == nil {
+		return []string{}
+	}
+	values, exists := g.config.ProtectedTags[tagName]
+	if !exists {
+		return []string{}
+	}
+	return values
+}
+
 func (g *Guardrail) isSensitiveField(field string) bool {
 	for _, sensitiveField := range g.config.SensitiveFields {
 		if strings.EqualFold(field, sensitiveField) {

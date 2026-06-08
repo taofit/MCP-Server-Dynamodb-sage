@@ -68,8 +68,8 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 	itemsText := fmt.Sprintf("DynamoDB Table: \"%s\"\nQueried %d items from table %s:", args.TableName, len(items), args.TableName)
 	scrubbedItems := srv.guardrail.ScrubItems(args.TableName, items)
 	for i, item := range scrubbedItems {
-		itemJson, _ := json.Marshal(item)
-		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJson))
+		itemJSON, _ := json.Marshal(item)
+		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJSON))
 	}
 
 	if len(output.LastEvaluatedKey) > 0 {
@@ -93,9 +93,18 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 }
 
 func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *PutItemArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
 		return srv.errorResult(err.Error()), nil, nil
 	}
+
+	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v; table item cannot be put", err)), nil, nil
+	}
+
 	if len(args.Item) == 0 {
 		return srv.errorResult(fmt.Sprintf("Item to put into table %s cannot be empty", args.TableName)), nil, nil
 	}
@@ -268,8 +277,8 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 	itemsText := fmt.Sprintf("⚠️ Warning: Scan reads the entire table and is costly in RCU. Consider using query_table with a GSI for better performance and lower cost.\n\nDynamoDB Table: \"%s\"\nScanned %d items from table %s:", args.TableName, len(items), args.TableName)
 	scrubbedItems := srv.guardrail.ScrubItems(args.TableName, items)
 	for i, item := range scrubbedItems {
-		itemJson, _ := json.Marshal(item)
-		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJson))
+		itemJSON, _ := json.Marshal(item)
+		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJSON))
 	}
 	// Check if there are more items available
 	if len(out.LastEvaluatedKey) > 0 {
@@ -292,9 +301,18 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 }
 
 func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchPutItemsArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
 		return srv.errorResult(err.Error()), nil, nil
 	}
+
+	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v; table items cannot be put", err)), nil, nil
+	}
+
 	if len(args.Items) == 0 {
 		return srv.errorResult(fmt.Sprintf("No items to put into table %s", args.TableName)), nil, nil
 	}
@@ -374,6 +392,10 @@ func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolReques
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
+	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v; table items cannot be deleted", err)), nil, nil
+	}
+
 	if len(args.Keys) == 0 {
 		return srv.errorResult(fmt.Sprintf("No keys provided to delete from table %s", args.TableName)), nil, nil
 	}
@@ -449,8 +471,16 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
+	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
 	if len(args.Key) == 0 {
 		return srv.errorResult(fmt.Sprintf("Key is required for deleting an item from table %s", args.TableName)), nil, nil
+	}
+
+	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v; table item cannot be deleted", err)), nil, nil
 	}
 	av, err := attributevalue.MarshalMap(args.Key)
 	if err != nil {
@@ -476,18 +506,18 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	srv.sendAuditLog("delete_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
 	if len(output.Attributes) == 0 {
-		keyJson, _ := json.Marshal(args.Key)
-		return srv.errorResult(fmt.Sprintf("Item with key %s not found in table %s", string(keyJson), args.TableName)), nil, nil
+		keyJSON, _ := json.Marshal(args.Key)
+		return srv.errorResult(fmt.Sprintf("Item with key %s not found in table %s", string(keyJSON), args.TableName)), nil, nil
 	}
 
 	attributes := map[string]any{}
 	attributevalue.UnmarshalMap(output.Attributes, &attributes)
 
 	scrubbed := srv.guardrail.ScrubItems(args.TableName, []map[string]any{attributes})
-	itemJson, _ := json.Marshal(scrubbed[0])
-	keyJson, _ := json.Marshal(args.Key)
+	itemJSON, _ := json.Marshal(scrubbed[0])
+	keyJSON, _ := json.Marshal(args.Key)
 
-	return srv.successResult(fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJson), args.TableName, string(itemJson))), nil, nil
+	return srv.successResult(fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJSON), args.TableName, string(itemJSON))), nil, nil
 }
 
 func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *GetItemArgs) (*mcp.CallToolResult, any, error) {
@@ -539,6 +569,10 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
+	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v; table item cannot be updated", err)), nil, nil
+	}
+
 	if args.Key == nil {
 		return srv.errorResult(fmt.Sprintf("Error when updating item for table: %s key is required", args.TableName)), nil, nil
 	}
@@ -588,7 +622,7 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	var scrubbedItem map[string]any
 	if len(output.Attributes) != 0 {
 		attributevalue.UnmarshalMap(output.Attributes, &attributes)
-		scrubbedItem = srv.guardrail.ScrubItems(args.TableName,[]map[string]any{attributes})[0]
+		scrubbedItem = srv.guardrail.ScrubItems(args.TableName, []map[string]any{attributes})[0]
 	}
 
 	keyJSON, _ := json.Marshal(args.Key)
@@ -597,7 +631,6 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		scrubbedAttributeJSON, _ := json.Marshal(scrubbedItem)
 		attributesMsg = fmt.Sprintf(", Attributes: %s", string(scrubbedAttributeJSON))
 	}
-
 
 	return srv.successResult(fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJSON), args.TableName, attributesMsg)), nil, nil
 }
@@ -761,6 +794,14 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		addAttribute(lsi.SortKey)
 	}
 
+	var tags = []types.Tag{}
+	for _, tag := range args.Tags {
+		tags = append(tags, types.Tag{
+			Key:   aws.String(tag.Key),
+			Value: aws.String(strings.Join(tag.Value, ",")),
+		})
+	}
+
 	attributeDefinitionList := make([]types.AttributeDefinition, 0, len(attributeDefinitionMap))
 	for _, ad := range attributeDefinitionMap {
 		attributeDefinitionList = append(attributeDefinitionList, ad)
@@ -773,6 +814,7 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		GlobalSecondaryIndexes: gsis,
 		LocalSecondaryIndexes:  lsis,
 		ProvisionedThroughput:  srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
+		Tags:                   tags,
 	})
 	if err != nil {
 		srv.sendAuditLog("create_table", args.TableName, "", nil, err)
@@ -787,6 +829,14 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, args *UpdateTableArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
 		return srv.errorResult(fmt.Sprintf("UpdateTable: %v", err)), nil, nil
+	}
+
+	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
+	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v; table cannot be updated", err)), nil, nil
 	}
 
 	input := &dynamodb.UpdateTableInput{
@@ -806,7 +856,7 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 		if err := srv.guardrail.ValidateCapacityUnits(wu); err != nil {
 			return srv.errorResult(fmt.Sprintf("UpdateTable: %v", err)), nil, nil
 		}
-		if 	ru == 0 {
+		if ru == 0 {
 			ru = 1
 		}
 		if wu == 0 {
@@ -854,6 +904,14 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, args *DeleteTableArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
 		return srv.errorResult(fmt.Sprintf("DeleteTable: %v", err)), nil, nil
+	}
+
+	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
+	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v; table cannot be deleted", err)), nil, nil
 	}
 	_, err := srv.db.DeleteTable(ctx, &dynamodb.DeleteTableInput{
 		TableName: aws.String(args.TableName),
@@ -1071,4 +1129,33 @@ func (srv *Server) getAttributeDefinitions(adList []types.AttributeDefinition) [
 		attributeDefinitions = append(attributeDefinitions, fmt.Sprintf("%s (%s)", *ad.AttributeName, ad.AttributeType))
 	}
 	return attributeDefinitions
+}
+
+func (srv *Server) validateProtectedTag(ctx context.Context, tableName string) error {
+	desc, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+		TableName: aws.String(tableName),
+	})
+	if err != nil {
+		return fmt.Errorf("error when describing table: %v", err)
+	}
+	tags, err := srv.db.ListTagsOfResource(ctx, &dynamodb.ListTagsOfResourceInput{
+		ResourceArn: desc.Table.TableArn,
+	})
+	if err != nil {
+		return fmt.Errorf("error when listing tags of resource: %v", err)
+	}
+
+	for _, tag := range tags.Tags {
+		var protectedTagValues = srv.guardrail.GetTags(*tag.Key)
+		if len(protectedTagValues) == 0 {
+			continue
+		}
+		for _, protectedTagValue := range protectedTagValues {
+			if protectedTagValue == *tag.Value {
+				return fmt.Errorf("protected tag %s:%s exists for table %s", *tag.Key, *tag.Value, tableName)
+			}
+		}
+	}
+
+	return nil
 }

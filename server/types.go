@@ -97,6 +97,12 @@ type CreateTableArgs struct {
 	LSIs                 []LSI                 `json:"lsis"`
 	ReadCapacityUnits    int64                 `json:"readCapacityUnits,omitempty"`
 	WriteCapacityUnits   int64                 `json:"writeCapacityUnits,omitempty"`
+	Tags                 []Tag                 `json:"tags,omitempty"`
+}
+
+type Tag struct {
+	Key   string   `json:"key"`
+	Value []string `json:"value"`
 }
 
 type UpdateTableArgs struct {

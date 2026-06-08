@@ -30,12 +30,13 @@ type RiskThresholds struct {
 }
 
 type AppConfig struct {
-	GlobalLimits    GlobalLimits   `yaml:"global_limits"`
-	SensitiveFields []string       `yaml:"sensitive_fields"`
-	ProtectedTables []string       `yaml:"protected_tables"`
-	Tables          []TableConfig  `yaml:"tables"`
-	RiskThresholds  RiskThresholds `yaml:"risk_thresholds"`
-	RiskLevel       RiskLevel      `yaml:"risk_level"`
+	GlobalLimits    GlobalLimits           `yaml:"global_limits"`
+	SensitiveFields []string               `yaml:"sensitive_fields"`
+	ProtectedTables []string               `yaml:"protected_tables"`
+	Tables          []TableConfig          `yaml:"tables"`
+	RiskThresholds  RiskThresholds         `yaml:"risk_thresholds"`
+	RiskLevel       RiskLevel              `yaml:"risk_level"`
+	ProtectedTags   map[string][]string    `yaml:"protected_tags"`
 }
 
 type RiskLevel int
@@ -53,8 +54,12 @@ const (
 	DefaultMaxThroughputIncrease int32 = 2000
 	DefaultUpdateExpressionDepth int32 = 5
 	DefaultScanCostUSD         float64 = 0.05
-	DefaultTableSizeMB         float64 = 10// 10MB
+	DefaultTableSizeMB         float64 = 10 // 10MB
 )
+
+var DefaultProtectedTags = map[string][]string{
+	"environment": {"production", "prod"},
+}
 
 func LoadConfig(filename string) (*AppConfig, error) {
 	data, err := os.ReadFile(filename)
@@ -98,7 +103,10 @@ func LoadConfig(filename string) (*AppConfig, error) {
 	if config.RiskThresholds.TableSizeMB <= 0 {
 		config.RiskThresholds.TableSizeMB = DefaultTableSizeMB
 	}
-	
+	if len(config.ProtectedTags) == 0 {
+		// set default protected tags if not set
+		config.ProtectedTags = DefaultProtectedTags
+	}
 
 	return &config, nil
 }
