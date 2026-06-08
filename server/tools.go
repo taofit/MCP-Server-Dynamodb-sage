@@ -479,6 +479,41 @@ func (srv *Server) addTools() {
 						"required": []string{"indexName", "sortKey"},
 					},
 				},
+				"tags": map[string]any{
+					"type":        "array",
+					"description": "The tags for the table example: [{\"key\":\"Environment\",\"value\":[\"Production\"]},{\"key\":\"Name\",\"value\":[\"DynamoDBTable\"]}]",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"key": map[string]any{
+								"type":        "string",
+								"description": "The key of the tag",
+							},
+							"value": map[string]any{
+								"type":        "array",
+								"description": "The value of the tag",
+								"items": map[string]any{
+									"type": "string",
+								},
+							},
+						},
+					},
+					"default": []any{
+						map[string]any{
+							"key": "environment",
+							"value": []any{
+								"production",
+							},
+						},
+						map[string]any{
+							"key": "name",
+							"value": []any{
+								"dynamodbtable",
+							},
+						},
+					},
+					"required": []string{"key", "value"},
+				},
 			},
 			"required": []string{"tableName", "keySchema"},
 		},

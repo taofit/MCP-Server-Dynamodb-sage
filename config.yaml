@@ -19,6 +19,9 @@ protected_tables:
   - Users
   - Orders
 
+protected_tags:
+  environment: ["production", "prod"]
+
 tables:
   - name: "Users"
     pii_fields: ["email", "phone_number"] ## they may be the same as sensitive_fields
