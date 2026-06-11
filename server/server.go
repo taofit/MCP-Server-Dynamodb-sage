@@ -39,7 +39,7 @@ func New(db *dynamodb.Client, userID, userARN, configPath, dbPath string) *Serve
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	guardrail := engine.NewGuardrail(config)
-	riskAnalyzer := risk.NewRiskAnalyzer(config, db, guardrail)
+	riskAnalyzer := risk.NewRiskAnalyzer(config, &risk.DynamoAdapter{Client: db}, guardrail)
 	auditLog, err := audit.NewAuditLog(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to create audit log: %v", err)

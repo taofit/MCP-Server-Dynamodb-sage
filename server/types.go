@@ -15,11 +15,13 @@ type DeleteTableArgs struct {
 }
 
 type ScanTableArgs struct {
-	TableName                 string         `json:"tableName"`
-	ExpressionAttributeValues map[string]any `json:"expressionAttributeValues"`
-	FilterExpression          string         `json:"filterExpression"`
-	ProjectionExpression      string         `json:"projectionExpression"`
-	Limit                     int32          `json:"limit"`
+	TableName                 string            `json:"tableName"`
+	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues"`
+	FilterExpression          string            `json:"filterExpression"`
+	ProjectionExpression      string            `json:"projectionExpression"`
+	IndexName                 string            `json:"indexName"`
+	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames"`
+	Limit                     int32             `json:"limit"`
 	ExclusiveStartKey         map[string]any `json:"exclusiveStartKey"`
 	ConsistentRead            *bool          `json:"consistentRead"`
 	Confirmation              *bool          `json:"confirmation"`
@@ -98,6 +100,13 @@ type CreateTableArgs struct {
 	ReadCapacityUnits    int64                 `json:"readCapacityUnits,omitempty"`
 	WriteCapacityUnits   int64                 `json:"writeCapacityUnits,omitempty"`
 	Tags                 []Tag                 `json:"tags,omitempty"`
+	Confirmation         *bool                 `json:"confirmation"`
+}
+
+type UpdateTableTTLArgs struct {
+	TableName   string `json:"tableName"`
+	AttributeName string `json:"attributeName"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type Tag struct {
@@ -115,14 +124,15 @@ type UpdateTableArgs struct {
 }
 
 type GSI struct {
-	IndexName    string `json:"indexName"`
-	PartitionKey string `json:"partitionKey"`
-	SortKey      string `json:"sortKey"`
+	IndexName      string `json:"indexName"`
+	PartitionKey   string `json:"partitionKey"`
+	SortKey        string `json:"sortKey"`
+	ProjectionType string `json:"projectionType"`
 }
 
 type LSI struct {
-	IndexName string `json:"indexName"`
-	SortKey   string `json:"sortKey"`
+	IndexName      string `json:"indexName"`
+	SortKey        string `json:"sortKey"`
 }
 
 type KeySchema struct {

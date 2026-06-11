@@ -238,12 +238,21 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 	if args.FilterExpression != "" {
 		input.FilterExpression = &args.FilterExpression
 	}
-	if args.ExpressionAttributeValues != nil {
+	if len(args.ExpressionAttributeValues) > 0 {
 		var err error
 		input.ExpressionAttributeValues, err = attributevalue.MarshalMap(args.ExpressionAttributeValues)
 		if err != nil {
 			return srv.errorResult(fmt.Sprintf("Error when marshaling expression attribute values: %v", err)), nil, nil
 		}
+	}
+	if len(args.ExpressionAttributeNames) > 0 {
+		input.ExpressionAttributeNames = make(map[string]string)
+		for k, v := range args.ExpressionAttributeNames {
+			input.ExpressionAttributeNames[k] = v
+		}
+	}
+	if args.IndexName != "" {
+		input.IndexName = &args.IndexName
 	}
 	if args.ExclusiveStartKey != nil {
 		startKey, err := attributevalue.MarshalMap(args.ExclusiveStartKey)
@@ -847,7 +856,7 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 		input.BillingMode = types.BillingMode(args.BillingMode)
 	}
 
-	if args.ProvisionedThroughput != nil && (args.ProvisionedThroughput.WriteCapacityUnits > 0 || args.ProvisionedThroughput.ReadCapacityUnits > 0 || args.BillingMode == string(types.BillingModeProvisioned)) {
+	if args.ProvisionedThroughput != nil && (args.ProvisionedThroughput.WriteCapacityUnits >= 0 || args.ProvisionedThroughput.ReadCapacityUnits >= 0 || args.BillingMode == string(types.BillingModeProvisioned)) {
 		ru := args.ProvisionedThroughput.ReadCapacityUnits
 		wu := args.ProvisionedThroughput.WriteCapacityUnits
 		if err := srv.guardrail.ValidateCapacityUnits(ru); err != nil {
@@ -922,6 +931,60 @@ func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, ar
 	}
 	srv.sendAuditLog("delete_table", args.TableName, "", nil, nil)
 	return srv.successResult(fmt.Sprintf("Successfully deleted table %s", args.TableName)), nil, nil
+}
+
+func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest, args *UpdateTableTTLArgs) (*mcp.CallToolResult, any, error) {
+	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("UpdateTable: %v", err)), nil, nil
+	}
+
+	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
+	}
+
+	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		return srv.errorResult(fmt.Sprintf("Validation error: %v; table cannot be modified", err)), nil, nil
+	}
+
+	output, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+		TableName: aws.String(args.TableName),
+	})
+	if err != nil {
+		return srv.errorResult(fmt.Sprintf("UpdateTableTTL %s failed: %v", args.TableName, err)), nil, nil
+	}
+	var attributeName string
+	for _, attr := range output.Table.AttributeDefinitions {
+		if *attr.AttributeName == args.AttributeName {
+			attributeName = *attr.AttributeName
+			break
+		}
+	}
+	if attributeName == "" {
+		return srv.errorResult(fmt.Sprintf("UpdateTableTTL: Attribute %s not found in table %s", args.AttributeName, args.TableName)), nil, nil
+	}
+
+	input := &dynamodb.UpdateTimeToLiveInput{
+		TableName: aws.String(args.TableName),
+		TimeToLiveSpecification: &types.TimeToLiveSpecification{
+			AttributeName: aws.String(attributeName),
+			Enabled:       aws.Bool(args.Enabled),
+		},
+	}
+
+	_, err = srv.db.UpdateTimeToLive(ctx, input)
+	if err != nil {
+		srv.sendAuditLog("update_table_ttl", args.TableName, "", nil, err)
+		return srv.errorResult(fmt.Sprintf("UpdateTableTTL %s failed: %v", args.TableName, err)), nil, nil
+	}
+	status := "Unknown"
+	ttlOutput, _ := srv.db.DescribeTimeToLive(ctx, &dynamodb.DescribeTimeToLiveInput{
+		TableName: aws.String(args.TableName),
+	})
+	if ttlOutput != nil && ttlOutput.TimeToLiveDescription != nil {
+		status = string(ttlOutput.TimeToLiveDescription.TimeToLiveStatus)
+	}
+	srv.sendAuditLog("update_table_ttl", args.TableName, "", nil, nil)
+	return srv.successResult(fmt.Sprintf("Successfully updated table %s TTL status to %s", args.TableName, status)), nil, nil
 }
 
 // readAuditLogs does not call sendAuditLog, so no change needed here.
@@ -1088,7 +1151,7 @@ func (srv *Server) getGSIs(args *CreateTableArgs) []types.GlobalSecondaryIndex {
 			IndexName: aws.String(gsi.IndexName),
 			KeySchema: gsiKeySchema,
 			Projection: &types.Projection{
-				ProjectionType: types.ProjectionTypeAll,
+				ProjectionType: types.ProjectionType(gsi.ProjectionType),
 			},
 			ProvisionedThroughput: srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
 		})

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -55,6 +56,14 @@ func (srv *Server) addTools() {
 				"expressionAttributeValues": map[string]any{
 					"type":        "object",
 					"description": "The expression attribute values for the scan",
+				},
+				"expressionAttributeNames": map[string]any{
+					"type":        "object",
+					"description": "The expression attribute names for the scan",
+				},
+				"indexName": map[string]any{
+					"type":        "string",
+					"description": "Optional: The name of an LSI or GSI to scan against. Omit to scan the base table.",
 				},
 				"limit": map[string]any{
 					"type":        "integer",
@@ -457,8 +466,14 @@ func (srv *Server) addTools() {
 								"description": "The write capacity units for the index",
 								"minimum":     1,
 							},
+							"projectionType": map[string]any{
+								"type":        "string",
+								"description": "The projection type for the index",
+								"enum":        []string{string(types.ProjectionTypeAll), string(types.ProjectionTypeKeysOnly), string(types.ProjectionTypeInclude)},
+								"default":     string(types.ProjectionTypeAll),
+							},
 						},
-						"required": []string{"indexName", "partitionKey"},
+						"required": []string{"indexName", "partitionKey", "projectionType"},
 					},
 				},
 				"lsis": map[string]any{
@@ -506,18 +521,23 @@ func (srv *Server) addTools() {
 							},
 						},
 						map[string]any{
-							"key": "name",
+							"key": "department",
 							"value": []any{
-								"dynamodbtable",
+								"finance",
 							},
 						},
 					},
 					"required": []string{"key", "value"},
 				},
+				"confirmation": map[string]any{
+					"type":        "boolean",
+					"description": "Please consider the warning carefully and then set to true to confirm the create operation",
+					"default":     false,
+				},
 			},
 			"required": []string{"tableName", "keySchema"},
 		},
-	}, srv.createOptimizedTable)
+	}, withRiskAnalysis(srv, srv.createOptimizedTable))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "delete_table",
@@ -662,6 +682,29 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName"},
 		},
 	}, withRiskAnalysis(srv, srv.updateTable))
+	
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "update_table_ttl",
+		Description: "Update a table's time to live",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{
+					"type":        "string",
+					"description": "The name of the table to update",
+				},
+				"attributeName": map[string]any{
+					"type":        "string",
+					"description": "The name of the attribute to set as TTL",
+				},
+				"enabled": map[string]any{
+					"type":        "boolean",
+					"description": "Enable or disable TTL",
+				},
+			},
+			"required": []string{"tableName", "enabled", "attributeName"},
+		},
+	}, srv.updateTableTTL)
 }
 
 func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
@@ -683,7 +726,13 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 			return srv.formatWarningResult(fmt.Sprintf("detected risk: %s", reason), req.Params.Name, m), empty, nil
 		}
 
-		return handler(ctx, req, input)
+		suggestions := srv.riskAnalyzer.TrackAndAdvise(ctx, req)
+		result, out, err := handler(ctx, req, input)
+		if len(suggestions) > 0 {
+			msg := fmt.Sprintf("💡 **Suggestions** 💡\n\n%s", strings.Join(suggestions, "\n"))
+			result.Content = append(result.Content, &mcp.TextContent{Text: msg})
+		}
+		return result, out, err
 	}
 }
 

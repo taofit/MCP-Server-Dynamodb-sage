@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"dynamodb-sage/internal/engine"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -231,98 +236,140 @@ func mustJSON(v interface{}) string {
 // ---------------------------------------------------------------------
 
 func TestAnalyzeScan_ReadOnlyTable(t *testing.T) {
-    cfg := testConfig()
-    guard := engine.NewGuardrail(cfg)
-    ra := NewRiskAnalyzer(cfg, nil, guard)
+	cfg := testConfig()
+	guard := engine.NewGuardrail(cfg)
+	ra := NewRiskAnalyzer(cfg, nil, guard)
 
-    req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "scan_table", Arguments: json.RawMessage(`{"tableName":"ReadOnlyTable"}`)}}
-    assessment, err := ra.analyzeScan(context.Background(), req)
-    if err != nil {
-        t.Fatalf("unexpected error: %v", err)
-    }
-    // Scan should be allowed; risk level low unless size exceeds thresholds
-    if assessment.Level != engine.LowRiskLevel && assessment.Level != engine.MediumRiskLevel {
-        t.Fatalf("expected Low or Medium risk for scan on read‑only table, got %v", assessment.Level)
-    }
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "scan_table", Arguments: json.RawMessage(`{"tableName":"ReadOnlyTable"}`)}}
+	assessment, err := ra.analyzeScan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Scan should be allowed; risk level low unless size exceeds thresholds
+	if assessment.Level != engine.LowRiskLevel && assessment.Level != engine.MediumRiskLevel {
+		t.Fatalf("expected Low or Medium risk for scan on read‑only table, got %v", assessment.Level)
+	}
 }
 
 func TestAnalyzeBatchDelete_ExceedBatchSize(t *testing.T) {
-    cfg := testConfig()
-    // set a low batch delete threshold to trigger the guardrail
-    cfg.RiskThresholds.BatchDeleteCount = 2
-    guard := engine.NewGuardrail(cfg)
-    ra := NewRiskAnalyzer(cfg, nil, guard)
+	cfg := testConfig()
+	// set a low batch delete threshold to trigger the guardrail
+	cfg.RiskThresholds.BatchDeleteCount = 2
+	guard := engine.NewGuardrail(cfg)
+	ra := NewRiskAnalyzer(cfg, nil, guard)
 
-    keys := []map[string]interface{}{{"id": "1"}, {"id": "2"}, {"id": "3"}}
-    args := fmt.Sprintf(`{"tableName":"NormalTable","keys":%s}`, mustJSON(keys))
-    req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "batch_delete_items", Arguments: json.RawMessage(args)}}
-    assessment, err := ra.analyzeBatchDelete(context.Background(), req)
-    if err != nil {
-        t.Fatalf("unexpected error: %v", err)
-    }
-    if assessment.Level != engine.MediumRiskLevel && assessment.Level != engine.HighRiskLevel {
-        t.Fatalf("expected at least MediumRisk for batch delete size overflow, got %v", assessment.Level)
-    }
-    if !strings.Contains(assessment.Reason, "Batch delete of 3 items exceeds") {
-        t.Fatalf("reason should mention batch‑delete count overflow: %s", assessment.Reason)
-    }
+	keys := []map[string]interface{}{{"id": "1"}, {"id": "2"}, {"id": "3"}}
+	args := fmt.Sprintf(`{"tableName":"NormalTable","keys":%s}`, mustJSON(keys))
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "batch_delete_items", Arguments: json.RawMessage(args)}}
+	assessment, err := ra.analyzeBatchDelete(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if assessment.Level != engine.MediumRiskLevel && assessment.Level != engine.HighRiskLevel {
+		t.Fatalf("expected at least MediumRisk for batch delete size overflow, got %v", assessment.Level)
+	}
+	if !strings.Contains(assessment.Reason, "Batch delete of 3 items exceeds") {
+		t.Fatalf("reason should mention batch‑delete count overflow: %s", assessment.Reason)
+	}
 }
 
 func TestAnalyzeBatchGet_ExceedBatchCount(t *testing.T) {
-    cfg := testConfig()
-    cfg.RiskThresholds.BatchGetCount = 2
-    guard := engine.NewGuardrail(cfg)
-    ra := NewRiskAnalyzer(cfg, nil, guard)
+	cfg := testConfig()
+	cfg.RiskThresholds.BatchGetCount = 2
+	guard := engine.NewGuardrail(cfg)
+	ra := NewRiskAnalyzer(cfg, nil, guard)
 
-    keys := []map[string]interface{}{{"id": "1"}, {"id": "2"}, {"id": "3"}}
-    args := fmt.Sprintf(`{"tableName":"NormalTable","keys":%s}`, mustJSON(keys))
-    req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "batch_get_items", Arguments: json.RawMessage(args)}}
-    assessment, err := ra.analyzeBatchGet(context.Background(), req)
-    if err != nil {
-        t.Fatalf("unexpected error: %v", err)
-    }
-    if assessment.Level != engine.MediumRiskLevel && assessment.Level != engine.HighRiskLevel {
-        t.Fatalf("expected at least MediumRisk for batch get count overflow, got %v", assessment.Level)
-    }
-    if !strings.Contains(assessment.Reason, "BatchGetItems request for 3 items exceeds") {
-        t.Fatalf("reason should mention batch‑get count overflow: %s", assessment.Reason)
-    }
+	keys := []map[string]interface{}{{"id": "1"}, {"id": "2"}, {"id": "3"}}
+	args := fmt.Sprintf(`{"tableName":"NormalTable","keys":%s}`, mustJSON(keys))
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "batch_get_items", Arguments: json.RawMessage(args)}}
+	assessment, err := ra.analyzeBatchGet(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if assessment.Level != engine.MediumRiskLevel && assessment.Level != engine.HighRiskLevel {
+		t.Fatalf("expected at least MediumRisk for batch get count overflow, got %v", assessment.Level)
+	}
+	if !strings.Contains(assessment.Reason, "BatchGetItems request for 3 items exceeds") {
+		t.Fatalf("reason should mention batch‑get count overflow: %s", assessment.Reason)
+	}
 }
 
 func TestAnalyzeDelete_ProtectedTable(t *testing.T) {
-    cfg := testConfig()
-    guard := engine.NewGuardrail(cfg)
-    ra := NewRiskAnalyzer(cfg, nil, guard)
+	cfg := testConfig()
+	guard := engine.NewGuardrail(cfg)
+	ra := NewRiskAnalyzer(cfg, nil, guard)
 
-    req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "delete_item", Arguments: json.RawMessage(`{"tableName":"ProtectedTable"}`)}}
-    assessment, err := ra.analyzeDelete(context.Background(), req)
-    if err != nil {
-        t.Fatalf("unexpected error: %v", err)
-    }
-    if assessment.Level != engine.MediumRiskLevel && assessment.Level != engine.HighRiskLevel {
-        t.Fatalf("expected at least MediumRisk for delete on protected table, got %v", assessment.Level)
-    }
-    if !strings.Contains(assessment.Reason, "protectedTable") {
-        t.Fatalf("reason should contain 'protectedTable': %s", assessment.Reason)
-    }
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "delete_item", Arguments: json.RawMessage(`{"tableName":"ProtectedTable"}`)}}
+	assessment, err := ra.analyzeDelete(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if assessment.Level != engine.MediumRiskLevel && assessment.Level != engine.HighRiskLevel {
+		t.Fatalf("expected at least MediumRisk for delete on protected table, got %v", assessment.Level)
+	}
+	if !strings.Contains(assessment.Reason, "protectedTable") {
+		t.Fatalf("reason should contain 'protectedTable': %s", assessment.Reason)
+	}
 }
 
 func TestAnalyzeUpdateTable_ReadOnlyTable(t *testing.T) {
-    cfg := testConfig()
-    guard := engine.NewGuardrail(cfg)
-    ra := NewRiskAnalyzer(cfg, nil, guard)
+	cfg := testConfig()
+	guard := engine.NewGuardrail(cfg)
+	ra := NewRiskAnalyzer(cfg, nil, guard)
 
-    args := json.RawMessage(`{"tableName":"ReadOnlyTable","provisionedThroughput":{"readCapacity":5}}`)
-    req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "update_table", Arguments: args}}
-    assessment, err := ra.analyzeUpdateTable(context.Background(), req)
-    if err != nil {
-        t.Fatalf("unexpected error: %v", err)
-    }
-    if assessment.Level != engine.MediumRiskLevel && assessment.Level != engine.HighRiskLevel {
-        t.Fatalf("expected at least MediumRisk for update_table on read‑only table, got %v", assessment.Level)
-    }
-    if !strings.Contains(assessment.Reason, "readonly") {
-        t.Fatalf("reason should contain 'readonly': %s", assessment.Reason)
-    }
+	args := json.RawMessage(`{"tableName":"ReadOnlyTable","provisionedThroughput":{"readCapacity":5}}`)
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "update_table", Arguments: args}}
+	assessment, err := ra.analyzeUpdateTable(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if assessment.Level != engine.MediumRiskLevel && assessment.Level != engine.HighRiskLevel {
+		t.Fatalf("expected at least MediumRisk for update_table on read‑only table, got %v", assessment.Level)
+	}
+	if !strings.Contains(assessment.Reason, "readonly") {
+		t.Fatalf("reason should contain 'readonly': %s", assessment.Reason)
+	}
 }
 
+func TestAnalyzeScan_GSIProjectionAllWarning(t *testing.T) {
+	// 1️⃣ Mock DynamoDB DescribeTable to return a table with one GSI:
+	mockDB := &mockDynamoDB{
+		DescribeTableOut: &dynamodb.DescribeTableOutput{
+			Table: &types.TableDescription{
+				GlobalSecondaryIndexes: []types.GlobalSecondaryIndexDescription{
+					{
+						IndexName: aws.String("MyGSI"),
+						Projection: &types.Projection{
+							ProjectionType: types.ProjectionTypeAll,
+						},
+					},
+				},
+			},
+		},
+	}
+	cfg := testConfig()
+	guard := engine.NewGuardrail(cfg)
+	ra := NewRiskAnalyzer(cfg, mockDB, guard)
+
+	// 2️⃣ Build a Scan request that targets the GSI:
+	args := map[string]any{
+		"tableName":        "MyTable",
+		"indexName":        "MyGSI",
+		"filterExpression": "status = :s",
+	}
+	payload, _ := json.Marshal(args)
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Name:      "scan_table",
+			Arguments: payload,
+		},
+	}
+
+	suggestions := ra.AnalyzeScan(context.Background(), req)
+
+	// 3️⃣ Expect our warning:
+	if !slices.Contains(suggestions, "⚠️ INFO: Scan against GSI 'MyGSI' with ALL projection type. Consider using a Projection Expression to reduce the amount of data read from the table.") {
+		t.Fatalf("expected GSI‑projection warning, got %v", suggestions)
+	}
+}
