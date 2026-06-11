@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"strings"
+	"sync"
 
 	"dynamodb-sage/internal/engine"
 
@@ -16,10 +17,37 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+type DynamoDBClient interface {
+	DescribeTable(ctx context.Context, input *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
+	GetItem(ctx context.Context, input *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
+	BatchGetItem(ctx context.Context, input *dynamodb.BatchGetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error)
+	DescribeTimeToLive(ctx context.Context, input *dynamodb.DescribeTimeToLiveInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTimeToLiveOutput, error)
+}
+
+// DynamoAdapter wraps the concrete DynamoDB client and satisfies DynamoDBClient.
+// Additional DynamoDB methods can be added here without changing the interface contract.
+type DynamoAdapter struct {
+	*dynamodb.Client
+}
+
+func (a *DynamoAdapter) DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error) {
+	return a.Client.DescribeTable(ctx, in, optFns...)
+}
+func (a *DynamoAdapter) GetItem(ctx context.Context, in *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+	return a.Client.GetItem(ctx, in, optFns...)
+}
+func (a *DynamoAdapter) BatchGetItem(ctx context.Context, in *dynamodb.BatchGetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error) {
+	return a.Client.BatchGetItem(ctx, in, optFns...)
+}
+func (a *DynamoAdapter) DescribeTimeToLive(ctx context.Context, in *dynamodb.DescribeTimeToLiveInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTimeToLiveOutput, error) {
+	return a.Client.DescribeTimeToLive(ctx, in, optFns...)
+}
+
 type RiskAnalyzer struct {
-	config    *engine.AppConfig
-	db        *dynamodb.Client
-	guardrail *engine.Guardrail
+    config      *engine.AppConfig
+    db          DynamoDBClient
+    guardrail   *engine.Guardrail
+    scanHistory sync.Map
 }
 
 type Assessment struct {
@@ -36,11 +64,19 @@ const (
 	pricePerMillionRCU = 0.125    // Price for eventually consistent reads
 )
 
-func NewRiskAnalyzer(config *engine.AppConfig, db *dynamodb.Client, guardrail *engine.Guardrail) *RiskAnalyzer {
+var patternMatch = map[string]string{
+	"name": "S", "email": "S", "phone": "S", "address": "S", "timestamp": "N", "year": "N", "age": "N", "salary": "N", "balance": "N",
+}
+var hotPartitionKeys = map[string]bool{
+	"status": true, "state": true, "gender": true, "active": true, "verified": true, "month": true, "year": true, "enabled": true, "disabled": true, "deleted": true, "archived": true, "ready": true, "processing": true, "unverified": true, "locked": true, "unlocked": true, "open": true, "closed": true, "cancelled": true, "completed": true, "failed": true, "pending": true,
+}
+
+func NewRiskAnalyzer(config *engine.AppConfig, db DynamoDBClient, guardrail *engine.Guardrail) *RiskAnalyzer {
 	return &RiskAnalyzer{
-		config:    config,
-		db:        db,
-		guardrail: guardrail,
+		config:      config,
+		db:          db,
+		guardrail:   guardrail,
+		scanHistory: sync.Map{},
 	}
 }
 
@@ -62,9 +98,31 @@ func (ra *RiskAnalyzer) Analyze(ctx context.Context, req *mcp.CallToolRequest) (
 		return ra.analyzePutItem(ctx, req)
 	case "update_item":
 		return ra.analyzeUpdateItem(ctx, req)
+	case "create_optimized_table":
+		return ra.analyzeCreateOptimizedTable(ctx, req)
 	default:
 		return Assessment{Level: engine.LowRiskLevel}, nil
 	}
+}
+
+func (ra *RiskAnalyzer) analyzeCreateOptimizedTable(ctx context.Context, req *mcp.CallToolRequest) (Assessment, error) {
+	var args struct {
+		TableName            string                   `json:"tableName"`
+		KeySchema            []map[string]interface{} `json:"keySchema"`
+		AttributeDefinitions []map[string]interface{} `json:"attributeDefinitions"`
+		Gsis                 []map[string]interface{} `json:"gsis"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return Assessment{}, fmt.Errorf("failed to parse arguments: %s", err)
+	}
+	log.Printf("[RiskAnalyzer] analyzeCreateOptimizedTable called for table %s", args.TableName)
+	var reason []string
+	reason = append(reason, ra.validateKeySchema(args.KeySchema)...)
+	reason = append(reason, ra.validateAttributeDefinitions(args.AttributeDefinitions)...)
+	reason = append(reason, ra.validateGsis(args.Gsis)...)
+
+	level := ra.getRiskLevel(reason)
+	return Assessment{Level: level, Reason: strings.Join(reason, "; ")}, nil
 }
 
 func (ra *RiskAnalyzer) analyzeUpdateItem(ctx context.Context, req *mcp.CallToolRequest) (Assessment, error) {
@@ -611,6 +669,80 @@ func (ra *RiskAnalyzer) validateCapacity(cu float64) string {
 		return fmt.Sprintf("Total CapacityUnits %f for the batch: %s", cu, err)
 	}
 	return ""
+}
+
+func (ra *RiskAnalyzer) validateKeySchema(keySchema []map[string]interface{}) []string {
+	var reason []string
+	for _, avKey := range keySchema {
+		attributeName, hasAN := avKey["attributeName"].(string)
+		keyType, hasKT := avKey["keyType"].(string)
+		if hasKT && hasAN {
+			if keyType == string(types.KeyTypeHash) {
+				if hotPartitionKeys[strings.ToLower(attributeName)] {
+					reason = append(reason, fmt.Sprintf("Hash key \"%s\" is a known hot partition key", attributeName))
+				}
+			}
+		}
+	}
+
+	var hasSortKey bool
+	var hasHashKey bool
+	for _, avKey := range keySchema {
+		keyType, _ := avKey["keyType"].(string)
+		if keyType == string(types.KeyTypeHash) {
+			hasHashKey = true
+		}
+		if keyType == string(types.KeyTypeRange) {
+			hasSortKey = true
+		}
+	}
+	if !hasHashKey {
+		reason = append(reason, "Table does not have a hash key, which is required for DynamoDB tables")
+	}
+	if hasHashKey && !hasSortKey {
+		reason = append(reason, "Table does not have a sort key, which is recommended for better query performance and data organization")
+	}
+	return reason
+}
+
+func (ra *RiskAnalyzer) validateAttributeDefinitions(attributeDefinitions []map[string]interface{}) []string {
+	var reason []string
+	for _, avItem := range attributeDefinitions {
+		attributeName, hasAN := avItem["attributeName"].(string)
+		attributeType, hasAT := avItem["attributeType"].(string)
+		if hasAN && hasAT {
+			// Check if the attribute name exists in patternMatch before comparing types
+			if expectedType, exists := patternMatch[attributeName]; exists && expectedType != attributeType {
+				reason = append(reason, fmt.Sprintf("Attribute \"%s\" type %s doesn't match expected type %s", attributeName, attributeType, expectedType))
+			}
+			if len(attributeName) > 100 {
+				reason = append(reason, fmt.Sprintf("Attribute name \"%s\" exceeds 100 characters limit", attributeName))
+			}
+		}
+	}
+	return reason
+}
+
+func (ra *RiskAnalyzer) validateGsis(gsis []map[string]interface{}) []string {
+	var reason []string
+	for _, gsis := range gsis {
+		partitionKey, hasPartitionKey := gsis["partitionKey"].(string)
+		if !hasPartitionKey {
+			continue
+		}
+		if hotPartitionKeys[strings.ToLower(partitionKey)] {
+			reason = append(reason, fmt.Sprintf("Global Secondary Index \"%s\" is a known hot partition key", partitionKey))
+		}
+
+		projectionType, hasPrjt := gsis["projectionType"].(string)
+		if hasPrjt && projectionType == string(types.ProjectionTypeAll) {
+			reason = append(reason, fmt.Sprintf("GSI %s uses ProjectionType %s", partitionKey, projectionType))
+		}
+	}
+	if len(gsis) > 5 {
+		reason = append(reason, fmt.Sprintf("Table has %d GSIs, exceeding the recommended maximum of 5", len(gsis)))
+	}
+	return reason
 }
 
 func (ra *RiskAnalyzer) getItemFromDB(ctx context.Context, getItemInput *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
