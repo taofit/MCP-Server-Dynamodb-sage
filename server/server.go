@@ -1,13 +1,17 @@
+// Package server implements the MCP server for DynamoDB Sage.
 package server
 
 import (
 	"context"
 	"dynamodb-sage/internal/audit"
 	"dynamodb-sage/internal/engine"
+	"dynamodb-sage/internal/queue"
 	"dynamodb-sage/internal/risk"
 	"log"
 	"net/http"
 	"os"
+	"runtime"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -22,6 +26,12 @@ type Server struct {
 	userARN      string
 	riskAnalyzer *risk.RiskAnalyzer
 	sseHandler   *mcp.SSEHandler
+	queue        *queue.QueueManager
+	queueCancel  context.CancelFunc
+	queueCtx     context.Context
+	mcpCtx       context.Context
+	mcpCancel    context.CancelFunc
+	jobStorage   sync.Map
 }
 
 type AuditBackend interface {
@@ -53,6 +63,8 @@ func New(db *dynamodb.Client, userID, userARN, configPath, dbPath string) *Serve
 		userARN:      userARN,
 		riskAnalyzer: riskAnalyzer,
 	}
+	srv.buildQueue()
+	srv.mcpCtx, srv.mcpCancel = context.WithCancel(context.Background())
 	srv.sseHandler = mcp.NewSSEHandler(func(req *http.Request) *mcp.Server {
 		return srv.s
 	}, nil)
@@ -65,9 +77,9 @@ func (srv *Server) HTTPHandler() http.Handler {
 	handler := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
 		return srv.s
 	}, &mcp.StreamableHTTPOptions{
-		JSONResponse:                true,
-		Stateless:                   true,
-		DisableLocalhostProtection:  true,
+		JSONResponse:               true,
+		Stateless:                  true,
+		DisableLocalhostProtection: true,
 	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +119,7 @@ func (srv *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) ServeStdio() error {
-	return srv.s.Run(context.Background(), &mcp.StdioTransport{})
+	return srv.s.Run(srv.mcpCtx, &mcp.StdioTransport{})
 }
 
 func (srv *Server) ServeHTTP(addr string) error {
@@ -119,4 +131,28 @@ func (srv *Server) ServeHTTP(addr string) error {
 
 func (srv *Server) RecordActionLog(backend AuditBackend, entry audit.AuditEntry) {
 	backend.LogActivity(entry)
+}
+
+func (srv *Server) buildQueue() {
+	cpuCount := runtime.NumCPU()
+	workerCount := cpuCount * 2
+	if workerCount < 4 {
+		workerCount = 4
+	}
+	buffer := workerCount * 2
+	srv.queue = queue.New(workerCount, buffer)
+	srv.queueCtx, srv.queueCancel = context.WithCancel(context.Background())
+	go srv.queue.Start(srv.queueCtx)
+}
+
+func (srv *Server) Shutdown(ctx context.Context) error {
+	srv.queue.Shutdown(ctx)
+	if srv.queueCancel != nil {
+		srv.queueCancel()
+	}
+	if srv.mcpCancel != nil {
+		srv.mcpCancel()
+	}
+
+	return nil
 }
