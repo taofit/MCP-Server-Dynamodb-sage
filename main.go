@@ -4,8 +4,10 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"dynamodb-sage/server"
@@ -100,10 +102,23 @@ func main() {
 			log.Fatalf("failed to serve dynamo-sage MCP server on standard IO: %v", err)
 		}
 	case "http":
-		if err := srv.ServeHTTP(":8080"); err != nil {
-			log.Fatalf("failed to serve dynamo-sage MCP server on HTTP: %v", err)
-		}
+		go func() {
+			if err := srv.ServeHTTP(":8080"); err != nil {
+				log.Fatalf("failed to serve dynamo-sage MCP server on HTTP: %v", err)
+			}
+		}()
 	default:
 		log.Fatalf("invalid MCP transport mode: %s", transportMode)
 	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	log.Println("Shutting down gracefully...")
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("server forced to shutdown: %v", err)
+	}
+	log.Println("Server exited")
 }

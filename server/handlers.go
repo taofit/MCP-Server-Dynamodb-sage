@@ -826,11 +826,11 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		Tags:                   tags,
 	})
 	if err != nil {
-		srv.sendAuditLog("create_table", args.TableName, "", nil, err)
+		srv.sendAuditLog("create_optimized_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("CreateTable %s failed: %v", args.TableName, err)), nil, nil
 	}
 	attributeDefinitions := srv.getAttributeDefinitions(output.TableDescription.AttributeDefinitions)
-	srv.sendAuditLog("create_table", args.TableName, "", nil, nil)
+	srv.sendAuditLog("create_optimized_table", args.TableName, "", nil, nil)
 
 	return srv.successResult(fmt.Sprintf("Successfully created table \"%s\"\n Attribute definitions: %s", args.TableName, strings.Join(attributeDefinitions, ", "))), nil, nil
 }
@@ -985,6 +985,24 @@ func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest,
 	}
 	srv.sendAuditLog("update_table_ttl", args.TableName, "", nil, nil)
 	return srv.successResult(fmt.Sprintf("Successfully updated table %s TTL status to %s", args.TableName, status)), nil, nil
+}
+
+func (srv *Server) getJobResult(ctx context.Context, req *mcp.CallToolRequest, args *GetJobResultArgs) (*mcp.CallToolResult, any, error) {
+	jobResult, ok := srv.jobStorage.Load(args.JobID)
+	defer srv.jobStorage.Delete(args.JobID)
+	if !ok {
+		return srv.errorResult(fmt.Sprintf("Job %s not found", args.JobID)), nil, nil
+	}
+	jr := jobResult.(*JobResult)
+	select {
+	case <-ctx.Done():
+		return srv.errorResult("Context cancelled"), nil, nil
+	case <-jr.Done:
+		if jr.Error != nil {
+			return srv.errorResult(fmt.Sprintf("Job %s failed: %s", args.JobID, jr.Error.Error())), nil, nil
+		}
+		return jr.Result, nil, nil
+	}
 }
 
 // readAuditLogs does not call sendAuditLog, so no change needed here.
@@ -1151,7 +1169,8 @@ func (srv *Server) getGSIs(args *CreateTableArgs) []types.GlobalSecondaryIndex {
 			IndexName: aws.String(gsi.IndexName),
 			KeySchema: gsiKeySchema,
 			Projection: &types.Projection{
-				ProjectionType: types.ProjectionType(gsi.ProjectionType),
+				ProjectionType:   types.ProjectionType(gsi.ProjectionType),
+				NonKeyAttributes: gsi.NonKeyAttributes,
 			},
 			ProvisionedThroughput: srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
 		})

@@ -3,13 +3,25 @@ package server
 import (
 	"bytes"
 	"context"
+	q "dynamodb-sage/internal/queue"
 	"encoding/json"
 	"fmt"
+
+	// "log"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type JobResult struct {
+	ID     string              `json:"id"`
+	Result *mcp.CallToolResult `json:"result,omitempty"`
+	Done   chan struct{}       `json:"done,omitempty"`
+	Error  error               `json:"error,omitempty"`
+}
 
 func (srv *Server) addTools() {
 	mcp.AddTool(srv.s, &mcp.Tool{
@@ -472,6 +484,13 @@ func (srv *Server) addTools() {
 								"enum":        []string{string(types.ProjectionTypeAll), string(types.ProjectionTypeKeysOnly), string(types.ProjectionTypeInclude)},
 								"default":     string(types.ProjectionTypeAll),
 							},
+							"nonKeyAttributes": map[string]any{
+								"type":        "array",
+								"description": "The non-key attributes to project. Required when ProjectionType is INCLUDE, and the list of attributes must include all attributes that you need to query.",
+								"items": map[string]any{
+									"type": "string",
+								},
+							},
 						},
 						"required": []string{"indexName", "partitionKey", "projectionType"},
 					},
@@ -682,7 +701,7 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName"},
 		},
 	}, withRiskAnalysis(srv, srv.updateTable))
-	
+
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "update_table_ttl",
 		Description: "Update a table's time to live",
@@ -705,6 +724,21 @@ func (srv *Server) addTools() {
 			"required": []string{"tableName", "enabled", "attributeName"},
 		},
 	}, srv.updateTableTTL)
+
+	mcp.AddTool(srv.s, &mcp.Tool{
+		Name:        "get_job_result",
+		Description: "Get the result of a job",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"jobId": map[string]any{
+					"type":        "string",
+					"description": "The ID of the job",
+				},
+			},
+			"required": []string{"jobId"},
+		},
+	}, srv.getJobResult)
 }
 
 func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
@@ -727,9 +761,39 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 		}
 
 		suggestions := srv.riskAnalyzer.TrackAndAdvise(ctx, req)
-		result, out, err := handler(ctx, req, input)
+		msg := ""
 		if len(suggestions) > 0 {
-			msg := fmt.Sprintf("💡 **Suggestions** 💡\n\n%s", strings.Join(suggestions, "\n"))
+			msg = fmt.Sprintf("💡 **Suggestions** 💡\n\nPlease consider the following and show it to user :\n%s", strings.Join(suggestions, "\n"))
+		}
+		if srv.isLargeOperation(req) {
+			id := uuid.New().String()
+			job := q.Job(func(ctx context.Context) error {
+				jobResult := &JobResult{ID: id, Done: make(chan struct{})}
+				srv.jobStorage.Store(id, jobResult)
+
+				jobCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+				defer cancel()
+
+				result, _, err := handler(jobCtx, req, input)
+				jobResult.Result = result
+				if err != nil {
+					jobResult.Error = err
+				}
+				close(jobResult.Done)
+				return nil
+			})
+			srv.queue.Enqueue(job)
+
+			if msg != "" {
+				msg = fmt.Sprintf("%s\n\nOperation %s queued for background processing. To see results call 'get_job_result' with job ID: %s", msg, req.Params.Name, id)
+			} else {
+				msg = fmt.Sprintf("Operation %s queued for background processing. To see results call 'get_job_result' with job ID: %s", req.Params.Name, id)
+			}
+			var empty Out
+			return srv.successResult(msg), empty, nil
+		}
+		result, out, err := handler(ctx, req, input)
+		if msg != "" {
 			result.Content = append(result.Content, &mcp.TextContent{Text: msg})
 		}
 		return result, out, err
@@ -793,4 +857,13 @@ func (srv *Server) ConvertToMap(input any) (map[string]any, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+func (srv *Server) isLargeOperation(req *mcp.CallToolRequest) bool {
+	switch req.Params.Name {
+	case "create_optimized_table", "batch_put_items", "batch_delete_items":
+		return true
+	default:
+		return false
+	}
 }

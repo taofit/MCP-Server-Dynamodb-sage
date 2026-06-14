@@ -123,11 +123,16 @@ type UpdateTableArgs struct {
 	Confirmation                *bool                              `json:"confirmation"`
 }
 
+type GetJobResultArgs struct {
+	JobID string `json:"jobId"`
+}
+
 type GSI struct {
-	IndexName      string `json:"indexName"`
-	PartitionKey   string `json:"partitionKey"`
-	SortKey        string `json:"sortKey"`
-	ProjectionType string `json:"projectionType"`
+	IndexName        string   `json:"indexName"`
+	PartitionKey     string   `json:"partitionKey"`
+	SortKey          string   `json:"sortKey"`
+	ProjectionType   string   `json:"projectionType"`
+	NonKeyAttributes []string `json:"nonKeyAttributes,omitempty"`
 }
 
 type LSI struct {

@@ -14,6 +14,14 @@ Key differentiators:
 
 [![Demo Video](https://img.youtube.com/vi/f4i8fxrdEBw/maxresdefault.jpg)](https://www.youtube.com/watch?v=f4i8fxrdEBw)
 
+<details>
+<summary><b>🗺️ View Architecture Flow Diagram</b></summary>
+
+<img src="image-3.png" width="700" alt="Architecture Flow Diagram"/>
+
+*Full description in [project-flow.md](project-flow.md)*
+</details>
+
 ## Prerequisites
 
 - [Docker](https://www.docker.com/)
