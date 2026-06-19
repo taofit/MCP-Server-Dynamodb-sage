@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
+  <title id="title">DynamoDB Sage Kafka flow</title>
+  <desc id="desc">MCP tool request passes guardrails, publishes to heavy-ops Kafka topic, workers write to DynamoDB, mutations are published to mutations topic, audit detects PII and sends live MCP notification.</desc>
+
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#475569"/>
+    </marker>
+    <style>
+      .box { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; rx: 14; }
+      .decision { fill: #fef3c7; stroke: #d97706; stroke-width: 2; rx: 14; }
+      .topic { fill: #ecfdf5; stroke: #059669; stroke-width: 2; rx: 18; }
+      .alert { fill: #fff1f2; stroke: #e11d48; stroke-width: 2; rx: 14; }
+      .text { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 20px; fill: #0f172a; font-weight: 600; }
+      .small { font-size: 16px; fill: #475569; font-weight: 500; }
+      .label { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 16px; fill: #334155; font-weight: 600; }
+      .arrow { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .dashed { stroke: #64748b; stroke-width: 2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="760" fill="#ffffff"/>
+  <text x="40" y="48" class="text" font-size="30">DynamoDB Sage Kafka Flow</text>
+
+  <rect x="40" y="90" width="220" height="70" class="box"/>
+  <text x="150" y="122" text-anchor="middle" class="text">Go MCP Server</text>
+  <text x="150" y="148" text-anchor="middle" class="small">Tool Request</text>
+
+  <rect x="340" y="90" width="250" height="70" class="decision"/>
+  <text x="465" y="122" text-anchor="middle" class="text">Guardrail + Risk</text>
+  <text x="465" y="148" text-anchor="middle" class="small">Analysis</text>
+
+  <rect x="670" y="90" width="250" height="70" class="box"/>
+  <text x="795" y="122" text-anchor="middle" class="text">Kafka Producer</text>
+  <text x="795" y="148" text-anchor="middle" class="small">Publish heavy op</text>
+
+  <rect x="1010" y="90" width="300" height="70" class="topic"/>
+  <text x="1160" y="122" text-anchor="middle" class="text">Topic 1</text>
+  <text x="1160" y="148" text-anchor="middle" class="small">dynamo-sage-heavy-ops</text>
+
+  <rect x="340" y="250" width="250" height="78" class="alert"/>
+  <text x="465" y="285" text-anchor="middle" class="text">Synchronous Response</text>
+  <text x="465" y="313" text-anchor="middle" class="small">Immediate alert</text>
+
+  <rect x="1010" y="250" width="300" height="78" class="box"/>
+  <text x="1160" y="285" text-anchor="middle" class="text">Kafka Consumer Group</text>
+  <text x="1160" y="313" text-anchor="middle" class="small">Worker pool goroutines</text>
+
+  <rect x="1010" y="390" width="300" height="78" class="box"/>
+  <text x="1160" y="425" text-anchor="middle" class="text">Amazon DynamoDB</text>
+  <text x="1160" y="453" text-anchor="middle" class="small">Direct write</text>
+
+  <rect x="1010" y="530" width="300" height="78" class="box"/>
+  <text x="1160" y="565" text-anchor="middle" class="text">Post-write Success</text>
+  <text x="1160" y="593" text-anchor="middle" class="small">CDC / mutation event</text>
+
+  <rect x="760" y="640" width="300" height="70" class="topic"/>
+  <text x="910" y="672" text-anchor="middle" class="text">Topic 2</text>
+  <text x="910" y="698" text-anchor="middle" class="small">dynamo-sage-mutations</text>
+
+  <rect x="430" y="640" width="230" height="70" class="box"/>
+  <text x="545" y="672" text-anchor="middle" class="text">Analytics Sink</text>
+  <text x="545" y="698" text-anchor="middle" class="small">Usage / metrics</text>
+
+  <rect x="1050" y="640" width="250" height="70" class="box"/>
+  <text x="1175" y="672" text-anchor="middle" class="text">Audit Log Sink</text>
+  <text x="1175" y="698" text-anchor="middle" class="small">Policy checks</text>
+
+  <rect x="1050" y="520" width="250" height="70" class="alert"/>
+  <text x="1175" y="552" text-anchor="middle" class="text">srv.SendNotification()</text>
+  <text x="1175" y="578" text-anchor="middle" class="small">Raw PII or violation</text>
+
+  <rect x="1050" y="390" width="250" height="70" class="alert"/>
+  <text x="1175" y="422" text-anchor="middle" class="text">Live Alert</text>
+  <text x="1175" y="448" text-anchor="middle" class="small">Claude / Cursor</text>
+
+  <path class="arrow" d="M260 125 L340 125"/>
+  <path class="arrow" d="M590 125 L670 125"/>
+  <path class="arrow" d="M920 125 L1010 125"/>
+
+  <text x="600" y="112" class="label">Passes</text>
+  <path class="arrow" d="M465 160 L465 250"/>
+  <text x="482" y="205" class="label">Fails</text>
+
+  <path class="arrow" d="M1160 160 L1160 250"/>
+  <path class="arrow" d="M1160 328 L1160 390"/>
+  <path class="arrow" d="M1160 468 L1160 530"/>
+
+  <path class="arrow" d="M1010 569 L910 640"/>
+  <path class="arrow" d="M1160 608 L1160 640"/>
+  <path class="arrow" d="M760 675 L660 675"/>
+  <path class="arrow" d="M1050 675 L1175 590"/>
+  <path class="arrow" d="M1175 520 L1175 460"/>
+
+  <text x="875" y="620" class="label">Audit detects raw PII</text>
+  <text x="1035" y="505" class="label">Notification path</text>
+</svg>

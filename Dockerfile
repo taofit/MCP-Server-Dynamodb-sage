@@ -27,6 +27,7 @@ COPY --from=builder /build/dynamodb-sage /app/dynamodb-sage
 
 # Copy the config file
 COPY config.yaml /app/config.yaml
+COPY config/kafka.yaml /app/config/kafka.yaml
 
 # Create the data directory for the SQLite audit DB
 RUN mkdir -p /app/data

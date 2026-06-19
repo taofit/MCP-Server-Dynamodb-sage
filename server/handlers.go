@@ -748,7 +748,7 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 	return srv.successResult(fmt.Sprintf("Successfully batch get %d items from table %s: %s%s", len(scrubbedItems), args.TableName, string(itemsJSON), unprocessedMsg)), nil, nil
 }
 
-func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRequest, args *CreateTableArgs) (*mcp.CallToolResult, any, error) {
+func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRequest, args *CreateOptimizedTableArgs) (*mcp.CallToolResult, any, error) {
 	keySchema, hashKey := srv.getKeySchema(args.KeySchema)
 
 	if len(args.LSIs) > 0 {
@@ -803,13 +803,7 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		addAttribute(lsi.SortKey)
 	}
 
-	var tags = []types.Tag{}
-	for _, tag := range args.Tags {
-		tags = append(tags, types.Tag{
-			Key:   aws.String(tag.Key),
-			Value: aws.String(strings.Join(tag.Value, ",")),
-		})
-	}
+	tags := toDynamoTags(args.Tags)
 
 	attributeDefinitionList := make([]types.AttributeDefinition, 0, len(attributeDefinitionMap))
 	for _, ad := range attributeDefinitionMap {
@@ -905,9 +899,61 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 		srv.sendAuditLog("update_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("UpdateTable %s failed: %v", args.TableName, err)), nil, nil
 	}
+
+	tags := toDynamoTags(args.Tags)
+	if len(tags) > 0 {
+		if output.TableDescription == nil || output.TableDescription.TableArn == nil {
+			return srv.errorResult(fmt.Sprintf("UpdateTable %s did not return a table ARN", args.TableName)), nil, nil
+		}
+		if err := srv.tagTable(ctx, args.TableName, *output.TableDescription.TableArn, tags); err != nil {
+			srv.sendAuditLog("update_table", args.TableName, "", nil, err)
+			return srv.errorResult(fmt.Sprintf("UpdateTable %s succeeded, but TagResource failed: %v", args.TableName, err)), nil, nil
+		}
+	}
+
 	srv.sendAuditLog("update_table", args.TableName, "", nil, nil)
 
+	if len(tags) > 0 {
+		return srv.successResult(fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v\n Tags applied: %s", args.TableName, output.TableDescription.TableStatus, tagSummary(tags))), nil, nil
+	}
+
 	return srv.successResult(fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v", args.TableName, output.TableDescription.TableStatus)), nil, nil
+}
+
+func toDynamoTags(tags []Tag) []types.Tag {
+	dynamoTags := make([]types.Tag, 0, len(tags))
+	for _, tag := range tags {
+		dynamoTags = append(dynamoTags, types.Tag{
+			Key:   aws.String(tag.Key),
+			Value: aws.String(strings.Join(tag.Value, ",")),
+		})
+	}
+	return dynamoTags
+}
+
+func (srv *Server) tagTable(ctx context.Context, tableName, tableArn string, tags []types.Tag) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	if tableArn == "" {
+		return fmt.Errorf("table ARN is required to tag DynamoDB table")
+	}
+	_, err := srv.db.TagResource(ctx, &dynamodb.TagResourceInput{
+		ResourceArn: aws.String(tableArn),
+		Tags:        tags,
+	})
+	if err != nil {
+		return fmt.Errorf("tag table %s: %w", tableName, err)
+	}
+	return nil
+}
+
+func tagSummary(tags []types.Tag) string {
+	items := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		items = append(items, fmt.Sprintf("%s=%s", *tag.Key, *tag.Value))
+	}
+	return strings.Join(items, ", ")
 }
 
 func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, args *DeleteTableArgs) (*mcp.CallToolResult, any, error) {
@@ -1149,7 +1195,7 @@ func (srv *Server) getKeySchema(keySchema []KeySchema) ([]types.KeySchemaElement
 	return keySchemaElements, hashKey
 }
 
-func (srv *Server) getGSIs(args *CreateTableArgs) []types.GlobalSecondaryIndex {
+func (srv *Server) getGSIs(args *CreateOptimizedTableArgs) []types.GlobalSecondaryIndex {
 	var gsisList []types.GlobalSecondaryIndex
 	for _, gsi := range args.GSIs {
 		gsiKeySchema := []types.KeySchemaElement{
@@ -1169,8 +1215,7 @@ func (srv *Server) getGSIs(args *CreateTableArgs) []types.GlobalSecondaryIndex {
 			IndexName: aws.String(gsi.IndexName),
 			KeySchema: gsiKeySchema,
 			Projection: &types.Projection{
-				ProjectionType:   types.ProjectionType(gsi.ProjectionType),
-				NonKeyAttributes: gsi.NonKeyAttributes,
+				ProjectionType: types.ProjectionType(gsi.ProjectionType),
 			},
 			ProvisionedThroughput: srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
 		})
@@ -1179,7 +1224,7 @@ func (srv *Server) getGSIs(args *CreateTableArgs) []types.GlobalSecondaryIndex {
 	return gsisList
 }
 
-func (srv *Server) getLsis(args *CreateTableArgs, hashKey string) []types.LocalSecondaryIndex {
+func (srv *Server) getLsis(args *CreateOptimizedTableArgs, hashKey string) []types.LocalSecondaryIndex {
 	var lsisList []types.LocalSecondaryIndex
 	for _, lsi := range args.LSIs {
 		lsiKeySchema := []types.KeySchemaElement{

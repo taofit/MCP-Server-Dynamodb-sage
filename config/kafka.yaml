@@ -1,0 +1,8 @@
+enabled: true
+brokers:
+  - localhost:9092
+topics:
+  heavy_ops: heavy-operations
+  audit_log: audit-events
+consumerGroupName: dynamodb-sage-workers
+partitions: 3

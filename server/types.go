@@ -22,9 +22,9 @@ type ScanTableArgs struct {
 	IndexName                 string            `json:"indexName"`
 	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames"`
 	Limit                     int32             `json:"limit"`
-	ExclusiveStartKey         map[string]any `json:"exclusiveStartKey"`
-	ConsistentRead            *bool          `json:"consistentRead"`
-	Confirmation              *bool          `json:"confirmation"`
+	ExclusiveStartKey         map[string]any    `json:"exclusiveStartKey"`
+	ConsistentRead            *bool             `json:"consistentRead"`
+	Confirmation              *bool             `json:"confirmation"`
 }
 
 type PutItemArgs struct {
@@ -45,9 +45,9 @@ type QueryTableArgs struct {
 }
 
 type BatchPutItemsArgs struct {
-	TableName string           `json:"tableName"`
-	Items     []map[string]any `json:"items"`
-	Confirmation              *bool          `json:"confirmation"`
+	TableName    string           `json:"tableName"`
+	Items        []map[string]any `json:"items"`
+	Confirmation *bool            `json:"confirmation"`
 }
 
 type BatchDeleteItemsArgs struct {
@@ -90,7 +90,7 @@ type ReadAuditLogsArgs struct {
 	Limit     int32  `json:"limit"`
 }
 
-type CreateTableArgs struct {
+type CreateOptimizedTableArgs struct {
 	TableName            string                `json:"tableName"`
 	KeySchema            []KeySchema           `json:"keySchema"`
 	AttributeDefinitions []AttributeDefinition `json:"attributeDefinitions"`
@@ -104,9 +104,9 @@ type CreateTableArgs struct {
 }
 
 type UpdateTableTTLArgs struct {
-	TableName   string `json:"tableName"`
+	TableName     string `json:"tableName"`
 	AttributeName string `json:"attributeName"`
-	Enabled     bool   `json:"enabled"`
+	Enabled       bool   `json:"enabled"`
 }
 
 type Tag struct {
@@ -121,6 +121,7 @@ type UpdateTableArgs struct {
 	ProvisionedThroughput       *ProvisionedThroughput             `json:"provisionedThroughput,omitempty"`
 	AttributeDefinitions        []AttributeDefinition              `json:"attributeDefinitions,omitempty"`
 	Confirmation                *bool                              `json:"confirmation"`
+	Tags                        []Tag                              `json:"tags,omitempty"`
 }
 
 type GetJobResultArgs struct {
@@ -136,8 +137,8 @@ type GSI struct {
 }
 
 type LSI struct {
-	IndexName      string `json:"indexName"`
-	SortKey        string `json:"sortKey"`
+	IndexName string `json:"indexName"`
+	SortKey   string `json:"sortKey"`
 }
 
 type KeySchema struct {

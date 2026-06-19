@@ -88,8 +88,12 @@ func main() {
 		configPath = v
 	}
 
+	kafkaConfigPath := "config/kafka.yaml"
+	if v := os.Getenv("KAFKA_CONFIG_PATH"); v != "" {
+		kafkaConfigPath = v
+	}
 	db := dynamodb.NewFromConfig(cfg)
-	srv := server.New(db, userID, userARN, configPath, dbPath)
+	srv := server.New(db, userID, userARN, configPath, kafkaConfigPath, dbPath)
 
 	transportMode := os.Getenv("MCP_TRANSPORT_MODE")
 	if transportMode == "" {

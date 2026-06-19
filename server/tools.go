@@ -3,13 +3,12 @@ package server
 import (
 	"bytes"
 	"context"
-	q "dynamodb-sage/internal/queue"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	// "log"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/google/uuid"
@@ -515,7 +514,7 @@ func (srv *Server) addTools() {
 				},
 				"tags": map[string]any{
 					"type":        "array",
-					"description": "The tags for the table example: [{\"key\":\"Environment\",\"value\":[\"Production\"]},{\"key\":\"Name\",\"value\":[\"DynamoDBTable\"]}]",
+					"description": "The tags for the table example: [{\"key\":\"environment\",\"value\":[\"staging\"]},{\"key\":\"name\",\"value\":[\"dynamodb-table\"]}]",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
@@ -536,7 +535,7 @@ func (srv *Server) addTools() {
 						map[string]any{
 							"key": "environment",
 							"value": []any{
-								"production",
+								"staging",
 							},
 						},
 						map[string]any{
@@ -598,13 +597,13 @@ func (srv *Server) addTools() {
 					"properties": map[string]any{
 						"readCapacity": map[string]any{
 							"type":        "integer",
-							"description": "The read capacity units for the table",
-							"minimum":     1,
+							"description": "The read capacity units for the table. Use 0 to let the server normalize it to 1.",
+							"minimum":     0,
 						},
 						"writeCapacity": map[string]any{
 							"type":        "integer",
-							"description": "The write capacity units for the table",
-							"minimum":     1,
+							"description": "The write capacity units for the table. Use 0 to let the server normalize it to 1.",
+							"minimum":     0,
 						},
 					},
 					"required": []string{"readCapacity", "writeCapacity"},
@@ -697,6 +696,27 @@ func (srv *Server) addTools() {
 						},
 					},
 				},
+				"tags": map[string]any{
+					"type":        "array",
+					"description": "The tags for the table example: [{\"key\":\"Environment\",\"value\":[\"Production\"]},{\"key\":\"Name\",\"value\":[\"DynamoDBTable\"]}]",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"key": map[string]any{
+								"type":        "string",
+								"description": "The key of the tag",
+							},
+							"value": map[string]any{
+								"type":        "array",
+								"description": "The value of the tag",
+								"items": map[string]any{
+									"type": "string",
+								},
+							},
+						},
+						"required": []string{"key", "value"},
+					},
+				},
 			},
 			"required": []string{"tableName"},
 		},
@@ -767,22 +787,31 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 		}
 		if srv.isLargeOperation(req) {
 			id := uuid.New().String()
-			job := q.Job(func(ctx context.Context) error {
-				jobResult := &JobResult{ID: id, Done: make(chan struct{})}
-				srv.jobStorage.Store(id, jobResult)
+			jobResult := &JobResult{ID: id, Done: make(chan struct{})}
+			srv.jobStorage.Store(id, jobResult)
 
-				jobCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-				defer cancel()
+			jobPayload := struct {
+				Input     In     `json:"input"`
+				Operation string `json:"operation"`
+			}{
+				Input:     input,
+				Operation: req.Params.Name,
+			}
+			inputPayload, err := json.Marshal(jobPayload)
+			if err != nil {
+				var empty Out
+				return srv.errorResult(fmt.Sprintf("failed to marshal input: %v", err)), empty, nil
+			}
 
-				result, _, err := handler(jobCtx, req, input)
-				jobResult.Result = result
-				if err != nil {
-					jobResult.Error = err
-				}
-				close(jobResult.Done)
-				return nil
-			})
-			srv.queue.Enqueue(job)
+			if srv.kafkaProducer != nil {
+				log.Printf("kafka producer is not nil, enqueueing task: %s", id)
+				srv.kafkaProducer.EnqueueTask(id, inputPayload)
+			} else {
+				log.Printf("kafka producer is nil, using go's native queue: %s", id)
+				srv.queue.Submit(func(ctx context.Context) error {
+					return srv.processHeavyOp(id, inputPayload)
+				})
+			}
 
 			if msg != "" {
 				msg = fmt.Sprintf("%s\n\nOperation %s queued for background processing. To see results call 'get_job_result' with job ID: %s", msg, req.Params.Name, id)

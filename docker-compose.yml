@@ -1,11 +1,88 @@
 services:
+  app:                                   # ← your Go binary
+    build: .                             # Dockerfile that runs `go run main.go`
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"                      # expose the HTTP API you use locally
+    env_file: .env
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - AWS_BASE_ENDPOINT=${AWS_BASE_ENDPOINT:-}
+      - AWS_REGION=${AWS_REGION}
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
+      - CONFIG_PATH=${CONFIG_PATH}
+      - KAFKA_CONFIG_PATH=/app/config/kafka.yaml
+      - DYNAMO_SAGE_DB=${DYNAMO_SAGE_DB}
+      - DYNAMO_SAGE_ADDR=${DYNAMO_SAGE_ADDR}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - MCP_TRANSPORT_MODE=${MCP_TRANSPORT_MODE}
+    volumes:
+      - ./.env:/app/.env
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
   localstack:
+    profiles: ["local"]
     image: localstack/localstack:latest
     ports:
-      - "4566:4566"            # Edge service (All AWS services use this port)
+      - "4566:4566"
     environment:
       - SERVICES=iam,sts,dynamodb,s3
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
-      - DYNAMODB_SHARE_DB=1    # Use one DB for all regions (easier for local dev)
+      - DYNAMODB_SHARE_DB=1
     volumes:
       - "./scripts/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    ports:
+      - "2181:2181"
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    depends_on:
+      - zookeeper
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nc -z kafka 9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+  # ------------------------------------------------------------------
+  # Init container – creates the heavy‑operations topic (ONE‑TIME)
+  # ------------------------------------------------------------------
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["kafka-topics", "--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "heavy-operations", "--replication-factor", "1", "--partitions", "3"]
