@@ -59,7 +59,61 @@ MCP Client (Claude/Cursor/etc)
    - `internal/audit/` — logger, entry model, SQLite queries
    - MCP tool `read_audit_logs` with time range + limit filters
 
-7. Multi-tenant isolation — per-team API keys, separate audit logs, table namespacing:
+7. Kafka event pipeline and proactive MCP notifications — async writes, audit analytics, and live alerts:
+
+   **Kafka flow**
+
+   ![Kafka flow](assets/kafka-flow.svg)
+
+   **Readable flow**
+
+   1. A client sends a tool request to the Go MCP server.
+   2. The server runs synchronous guardrail and risk checks.
+   3. If the request fails, the server returns an immediate synchronous alert.
+   4. If the request passes, the server publishes a heavy-operation task to Kafka topic `dynamo-sage-heavy-ops`.
+   5. A Kafka consumer group runs worker goroutines that execute the direct DynamoDB write.
+   6. After the write succeeds, the worker publishes a mutation event to Kafka topic `dynamo-sage-mutations`.
+   7. Analytics and audit sinks consume `dynamo-sage-mutations`.
+   8. If the audit sink detects raw PII or a policy violation, the MCP server sends a live notification to Claude/Cursor.
+
+   **How Kafka benefits the MCP server**
+
+   The MCP server is the entry point that LLM-driven tools call to work with DynamoDB. Most operations are fast, such as list tables or get item, but heavy-weight tasks like batch writes, scans, restores, or risk-analysed jobs can run for seconds or minutes. Kafka moves those heavy operations out of the request path and into a durable event pipeline.
+
+   - `dynamo-sage-heavy-ops` is the task ingress topic.
+   - `dynamo-sage-mutations` is the egress and audit stream after DynamoDB writes complete.
+   - Kafka consumer group replicas can scale worker concurrency horizontally.
+   - Failed workers do not lose jobs because Kafka retains messages for replay.
+   - Consumer lag and partition offsets provide operational visibility into backlog and saturation.
+   - The MCP API remains fast because the client receives an immediate queued acknowledgment instead of waiting for long-running work.
+
+   **Security and notification behavior**
+
+   After a write succeeds, the mutation event is published to `dynamo-sage-mutations`. Audit and analytics sinks consume that stream. If the audit sink detects raw PII, unencrypted secrets, or another policy violation, the MCP server emits a live notification through `srv.SendNotification()`.
+
+   Example live alert:
+
+   ```text
+   ⚠️ SECURITY ALERT: Background stream detected raw PII written to table Users!
+   ```
+
+   This notification reaches both the human developer and the LLM agent. In Claude Desktop it can appear in the developer log or active UI pane. In Cursor or another advanced IDE interface it can surface as an environmental toast warning or alert banner in the chat sidebar.
+
+   **AI agent reaction**
+
+   MCP standard notifications such as `notifications/message` are visible to the underlying LLM agent controlling the workspace. When Kafka drops an alert into the stream:
+
+   - The LLM context window is updated with the notification text.
+   - The agent can stop its current task and react to the alert.
+   - The agent can ask the human whether to remediate, for example:
+
+   ```text
+   I just detected that another application pushed unencrypted PII into our table via the background Kafka stream. Should I write a migration script or call delete_item to wipe that record for security compliance?
+   ```
+
+   **Bottom line:** Kafka makes the MCP server scalable, resilient, observable, and proactive. Heavy operations become durable jobs, DynamoDB mutations become replayable audit events, and security findings become live alerts that both the human and the AI agent can act on immediately.
+
+8. Multi-tenant isolation — per-team API keys, separate audit logs, table namespacing:
    - `internal/auth/apikeys.go` — API key generation and validation
    - `internal/auth/tenant.go` — tenant context extraction from request
    - `config/provisioning.go` — per-tenant guardrails and table prefix
@@ -99,8 +153,9 @@ MCP Client (Claude/Cursor/etc)
 
 **Tech stack recommendation (Go, since your workspace is Go):**
 
-- [`mark3labs/mcp-go`](https://github.com/mark3labs/mcp-go) — MCP server SDK for Go
+- [`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk) — MCP server SDK for Go
 - `aws-sdk-go-v2` — DynamoDB client
+- `github.com/IBM/sarama` — Kafka producer/client for async job events, audit analytics, and proactive notifications
 - Config file (YAML) to define protected tables, cost thresholds, and environment labels
 
 **Project structure:**
@@ -109,53 +164,51 @@ MCP Client (Claude/Cursor/etc)
 dynamo-sage/
 ├── main.go
 │
-├── server/                        # (1) MCP server layer
-│   ├── mcp.go                     # MCP tool registration
-│   └── handlers.go                # tool handler dispatch
+├── server/                        # MCP server layer
+│   ├── server.go                  # server construction, HTTP/stdin handlers, shutdown
+│   ├── handlers.go                # DynamoDB MCP tool handlers
+│   ├── tools.go                   # MCP tool registration and schemas
+│   └── types.go                   # MCP tool input argument structs
 │
-├── config/                        # (4) Guardrails + configuration
-│   ├── config.go                  # load YAML config
-│   ├── environments.go            # dev/staging/prod detection
-│   ├── policies.go                # per-table permission policies
-│   ├── budgets.go                 # daily/monthly cost budgets
-│   └── approval_flows.go          # multi-step approval for high-risk ops
+├── config.yaml                    # runtime guardrails and table policy configuration
 │
 ├── internal/
-│   ├── dynamo/                    # DynamoDB client
-│   │   ├── client.go              # AWS DynamoDB client wrapper
-│   │   └── describe.go            # table metadata fetching
+│   ├── engine/                    # config loading and guardrails
+│   │   ├── config.go              # load YAML config
+│   │   └── guardrails.go          # protected tables, schema validation, limits
 │   │
-│   ├── risk/                      # (2) Risk analyzer
+│   ├── risk/                      # risk analyzer and schema advisor
 │   │   ├── analyzer.go            # main risk analysis logic
-│   │   ├── harm.go                # destructive op detection
-│   │   └── confirm.go             # (5) confirmation flow — warning + user prompt
+│   │   ├── advisor.go             # schema/risk recommendations
+│   │   ├── mock.go                # test doubles for DynamoDB risk checks
+│   │   └── analyzer_test.go       # risk analyzer unit tests
 │   │
-│   ├── cost/                      # (3) Cost estimation
-│   │   └── estimator.go           # RCU/WCU cost estimation
+│   ├── audit/                     # SQLite audit log
+│   │   └── audit.go               # audit entry model, SQLite setup, queries
 │   │
-│   ├── audit/                     # (6) Audit log (done)
-│   │   ├── logger.go              # AuditLogger struct, writes after each handler
-│   │   ├── entry.go               # AuditEntry struct
-│   │   └── db.go                  # SQLite setup, insert and query helpers
+│   ├── queue/                     # in-process worker pool for current async batch jobs
+│   │   └── queue.go               # worker pool, job channel, retry handling
 │   │
-│   ├── auth/                      # (7) Multi-tenant isolation
-│   │   ├── apikeys.go             # API key generation and validation
-│   │   └── tenant.go              # tenant context extraction from request
+│   ├── kafka/                     # durable async job/event backbone
+│   │   └── producer.go            # Sarama producer for heavy-op events
 │   │
-│   ├── dashboard/                 # (8) Admin dashboard
-│   │   ├── handler.go             # HTTP handlers for dashboard routes
-│   │   └── templates/             # HTML templates
-│   │
-│   └── rest/                      # (10) REST API wrapper
-│       ├── handler.go             # HTTP handlers for REST endpoints
-│       └── router.go              # route registration
+│   ├── dynamo/                    # planned DynamoDB client wrapper
+│   ├── cost/                      # planned RCU/WCU cost estimation
+│   ├── auth/                      # planned multi-tenant API keys and tenant context
+│   ├── dashboard/                 # planned admin dashboard
+│   └── rest/                      # planned REST API wrapper for non-MCP clients
 │
-├── docker-compose.yml             # (9) One-liner self-hosting
+├── docker-compose.yml             # local self-hosting
+├── scripts/
+│   ├── deploy.sh                  # Lightsail deploy helper
+│   └── setup-lightsail.sh         # Lightsail instance setup
+├── terraform/
+│   └── lightsail/                 # Lightsail infrastructure reference
 ├── testing/
 │   ├── integration_test.go        # real AWS integration tests
 │   └── mocks.go                   # unit test mocks
 │
-└── README.md                      # Project overview, problem, solution, demo, setup
+└── README.md                      # project overview, setup, deployment, MCP client examples
 ```
 
 **The key insight for the risk flow:**

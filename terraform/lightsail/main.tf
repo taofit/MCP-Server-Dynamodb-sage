@@ -48,11 +48,36 @@ resource "aws_lightsail_instance" "app" {
   blueprint_id      = "ubuntu_22_04"
   bundle_id         = var.instance_plan
   key_pair_name     = aws_lightsail_key_pair.main.name
+  depends_on        = [aws_iam_access_key.lightsail]
+
+
+  # -------------------------------------------------
+  # Bootstrap the VM with Docker
+  # -------------------------------------------------
+user_data = <<-EOF
+  #!/bin/bash
+  set -e
+
+  # Install Docker
+  apt-get update -y
+  apt-get install -y docker.io
+
+  # Install Docker Compose v2 plugin
+  DOCKER_CONFIG=/usr/local/lib/docker
+  mkdir -p $DOCKER_CONFIG/cli-plugins
+  curl -sSL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64" -o $DOCKER_CONFIG/cli-plugins/docker-compose
+  chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
+
+  # Create app directory for deploy.sh to populate
+  mkdir -p /opt/dynamodb-sage/data
+EOF
+
 
   tags = {
     Name = var.project_name
   }
 }
+
 
 # ------------------------------------------------------------------------------
 # Static IP

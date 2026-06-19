@@ -3,13 +3,13 @@
 **Security-first MCP gateway for DynamoDB** — LLMs securely interact with DynamoDB
 through a two-layer protection system: a **risk analyzer** pre-assesses every operation,
 then **guardrails** enforce capacity limits, validate schemas, and protect sensitive tables.
-Every action is audited. Designed for safe multi-tenant AI access to production
-data.
+Every action is audited. Large operations (batch puts, batch deletes, table creation)
+are offloaded to **Apache Kafka** for async background processing.
 
 Key differentiators:
 - **Two-layer protection**: risk analyzer pre-checks every operation for cost, size, and destructive potential; guardrails enforce hard limits on throughput, batch sizes, and schema compliance
-- **Audit trail**: every DynamoDB operation logged with principal, timestamp,
-  and throughput
+- **Async heavy operations**: Kafka-backed job queue for large DynamoDB operations (batch writes, table creation)
+- **Audit trail**: every DynamoDB operation logged with principal, timestamp, and throughput
 - **No direct SQL/NoSQL injection**: structured tool calls only
 
 [![Demo Video](https://img.youtube.com/vi/f4i8fxrdEBw/maxresdefault.jpg)](https://www.youtube.com/watch?v=f4i8fxrdEBw)
@@ -17,7 +17,7 @@ Key differentiators:
 <details>
 <summary><b>🗺️ View Architecture Flow Diagram</b></summary>
 
-<img src="image-3.png" width="700" alt="Architecture Flow Diagram"/>
+<img src="image-flow.png" width="700" alt="Architecture Flow Diagram"/>
 
 *Full description in [project-flow.md](project-flow.md)*
 </details>
@@ -25,114 +25,89 @@ Key differentiators:
 ## Prerequisites
 
 - [Docker](https://www.docker.com/)
-- [Go 1.25+](https://golang.org/)
+- [Go 1.25+](https://golang.org/) (for local binary development)
 - [LocalStack Pro account](https://app.localstack.cloud) (for local dev)
 - [Terraform 1.5+](https://www.terraform.io/) (for AWS deployment)
-- AWS CLI configured with credentials (for AWS deployment)
 
 ---
 
 ## Local Development
 
-### Setup
+The project uses **Docker Compose** to run all services locally:
 
-1. Copy the env file and add your LocalStack auth token:
+| Service      | Profile   | Default |
+|--------------|-----------|---------|
+| App (Go)     | —         | yes     |
+| Zookeeper    | —         | yes     |
+| Kafka        | —         | yes     |
+| LocalStack   | `local`   | no      |
+
+1. Copy the environment template and configure your LocalStack auth token:
+
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
-```
-# update for your project
+2. Edit `.env` and set your variables, e.g.:
+
+```bash
 LOCALSTACK_AUTH_TOKEN=your_token_here
 ```
 
-2. Update the setting in `config.yaml` according to your project's requirements. For example: set query limit, PII fields to hide, and tables schema constraints etc.
+3. Start the full development stack:
 
-3. Start LocalStack:  
 ```bash
-docker compose up -d
+docker compose --profile local up -d
 ```
 
-This will:
-- Start a LocalStack container on port `4566`
-- Automatically create the `Users` table with a GSI on `Email`
-- Insert test data (alice, bob, charlie)
+This starts the Go app, Kafka (with Zookeeper), and LocalStack.
 
-Verify it's running:
+4. Verify the services are healthy:
+
 ```bash
-curl http://localhost:4566/_localstack/health
+curl http://localhost:4566/_localstack/health   # LocalStack
+nc -z localhost 9092 && echo "Kafka up"         # Kafka
+curl http://localhost:8080/health               # Go app
 ```
 
-To stop:
+5. Stop all containers when done:
+
 ```bash
-docker compose down
+ docker compose --profile local down -v   # stop local stack and remove volumes
 ```
 
-### Run Go Code
+### Run Go binary locally (outside Docker)
 
-By default the server uses **stdio transport** (reads MCP messages from stdin/stdout):
+For faster iteration, run the Go binary directly while keeping Kafka and LocalStack in Docker:
 
 ```bash
+KAFKA_BROKERS=localhost:9093 \
+AWS_BASE_ENDPOINT=http://localhost:4566 \
+AWS_REGION=eu-north-1 \
+AWS_ACCESS_KEY_ID=your_key_id \
+AWS_SECRET_ACCESS_KEY=your_secret_key \
+MCP_TRANSPORT_MODE=http \
 go run main.go
 ```
 
-The server waits for MCP messages on stdin — make sure LocalStack is running first.
+> Kafka on `localhost:9093` (PLAINTEXT_HOST listener) and LocalStack on `localhost:4566` are the host-mapped ports from Docker.
 
-To run as an **HTTP server** (for use with the MCP Inspector or other HTTP clients):
-
-```bash
-MCP_TRANSPORT_MODE=http go run main.go
-```
-
-The server listens on port `8080` for HTTP POST requests using Streamable HTTP transport.
-
-### Verify DynamoDB Table
+**Custom HTTP address**
+You can change the listen address for the Go binary by setting the `DYNAMO_SAGE_ADDR` environment variable (e.g., `DYNAMO_SAGE_ADDR=":8081"`). The server defaults to `:8080` when services are started in docker environment or if the variable is unset when running locally.
+### Test with MCP Inspector
 
 ```bash
-aws dynamodb scan --table-name Users --endpoint-url http://localhost:4566
+npx @modelcontextprotocol/inspector --transport http http://localhost:8080
 ```
-
-### Test MCP Server Locally with Inspector
-
-Test with the MCP Inspector (requires Node.js/npm, opens browser):
-
-**Option A — HTTP mode** (recommended for testing, no restart needed):
-
-1. In one terminal, start the server in HTTP mode:
-   ```bash
-   MCP_TRANSPORT_MODE=http go run main.go
-   ```
-2. In another terminal, run the inspector with `--transport http`:
-   ```bash
-   npx @modelcontextprotocol/inspector --transport http http://localhost:8080
-   ```
-4. Click **"List Tools"** to verify tools are registered.
-5. Click **"Call Tool"** for `list_tables` to see results from LocalStack.
-
-**Option B — Stdio mode** (uses the default transport):
-
-1. Run the inspector:
-   ```bash
-   npx @modelcontextprotocol/inspector
-   ```
-2. In the browser, set transport type to **stdio**, command to `go run main.go`.
-3. Set the working directory by using `sh -c`:  
-   **Command**: `sh`  
-   **Args**: `-c`, `cd /path/to/project && exec go run main.go`
-4. Add required environment variables in the inspector's **Environment Variables** section (or they'll be inherited from your terminal).
 
 ---
 
-## AWS Deployment
+## AWS Deployment (Lightsail — Active, $5/mo)
 
-Two deployment options are available:
+A single Lightsail instance runs the full stack (app + Kafka + Zookeeper) in Docker via Compose.
+nginx + Let's Encrypt provide HTTPS with your own domain.
 
-### Option A: Lightsail (Active — $5/mo)
-
-Deploy a single Lightsail instance with nginx, TLS Encrypted HTTPS, and your own domain.
-Infrastructure code is preserved at `terraform/lightsail/` for reference.
-**First-time setup:**
+### First-time infrastructure
 
 ```bash
 cd terraform/lightsail
@@ -141,51 +116,56 @@ terraform apply
 ```
 
 This creates:
-- Lightsail instance (`nano_3_0`, Ubuntu 22.04)
+- Lightsail instance (`nano_3_0`, Ubuntu 22.04, Docker pre-installed)
 - Static IP address
-- SSH key (saved to `keys/lightsail.pem`)
-- IAM user with `AmazonDynamoDBFullAccess` (credentials saved to `keys/lightsail-credentials.ini`)
+- SSH key (`keys/lightsail.pem`)
+- IAM user with `AmazonDynamoDBFullAccess` (`keys/lightsail-credentials.ini`)
 - Firewall rules (ports 22, 80, 443)
 
-After apply, note the static IP:
+### Deploy the app
 
 ```bash
-terraform output static_ip
+./scripts/deploy.sh dynamodb-sage.yourdomain.com
 ```
 
-**One-time domain & HTTPS setup:**
+The script:
+1. Gets the static IP from Terraform
+2. Prompts you to add an A record at your DNS provider
+3. Builds the Go binary **locally** (avoiding compilation on the small Lightsail VM)
+4. Packages the project into a tarball and uploads it via SCP
+5. Writes the production `.env` with IAM credentials
+6. **First time only**: installs nginx + certbot for HTTPS
+7. Runs `docker compose up -d --build` to start app, Kafka, and Zookeeper
 
-1. Get the static IP from terraform output:
-   ```bash
-   terraform output static_ip
-   ```
-
-2. At your DNS provider (e.g. one.com), add an A record:
-   - **Type**: A
-   - **Host**: `dynamodb-sage`
-   - **Value**: `[STATIC_IP]`
-
-3. Run the deploy script with your actual domain:
-   ```bash
-   bash scripts/deploy.sh dynamodb-sage.yourdomain.com
-   ```
-
-**Deploy code changes:**
-
-Also keep `config.yaml` in sync — it's loaded at runtime:
-
-```bash
-GOOS=linux GOARCH=amd64 go build -o /tmp/dynamodb-sage .
-scp -i keys/lightsail.pem /tmp/dynamodb-sage config.yaml ubuntu@<IP>:/tmp/
-ssh -i keys/lightsail.pem ubuntu@<IP> "sudo cp /tmp/config.yaml /opt/dynamodb-sage/config.yaml && sudo systemctl restart dynamodb-sage"
-```
-
-**Verify health:**
+### Verify
 
 ```bash
 curl https://dynamodb-sage.yourdomain.com/health
 # → ok
 ```
+
+### Redeploy after code changes
+
+```bash
+./scripts/deploy.sh dynamodb-sage.yourdomain.com
+```
+
+The script skips nginx/certbot setup on subsequent runs.
+
+### Architecture
+
+| Component | Detail |
+|-----------|--------|
+| **Region** | `eu-north-1` |
+| **Compute** | Lightsail `nano_3_0` (2 vCPU, 0.5 GiB, 20 GB SSD) |
+| **App** | Go binary in Docker (pre-built locally, copied via tarball) |
+| **Queue** | Apache Kafka in Docker (Confluent 7.6.0) |
+| **Port** | 8080 |
+| **Transport** | Streamable HTTP (POST `/`) + SSE (`GET /sse`), health at `/health` |
+| **HTTPS** | Let's Encrypt via certbot + nginx reverse proxy |
+| **Domain** | Your own domain (A record at DNS provider) |
+| **IAM** | Dedicated IAM user with `AmazonDynamoDBFullAccess` |
+| **Logs** | `sudo docker compose logs app` |
 
 ---
 
@@ -200,45 +180,15 @@ terraform init
 terraform apply
 ```
 
-After apply:
-
-```bash
-terraform output cloudfront_domain
-# → d3xxxxxxxxxxxx.cloudfront.net
-```
-
-**Deploy code changes (ECS):**
-
-```bash
-docker buildx build --platform=linux/amd64 -t dynamodb-sage . --load && \
-docker tag dynamodb-sage:latest 335360747704.dkr.ecr.eu-north-1.amazonaws.com/dynamodb-sage:latest && \
-docker push 335360747704.dkr.ecr.eu-north-1.amazonaws.com/dynamodb-sage:latest && \
-aws ecs update-service --cluster dynamodb-sage-cluster --service dynamodb-sage-service --force-new-deployment --region eu-north-1
-```
-
-If not logged into ECR:
-
-```bash
-aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 335360747704.dkr.ecr.eu-north-1.amazonaws.com/dynamodb-sage
-```
-
-**Check ECS status:**
-
-```bash
-aws ecs describe-services --cluster dynamodb-sage-cluster --service dynamodb-sage-service --region eu-north-1
-```
-
 ---
 
 ## Connecting MCP Clients
 
-> **Public demo server** available at `https://dynamodb-sage.hzcentre.com` — try it directly with any MCP client by replacing the URL `https://dynamodb-sage.yourdomain.com` with `https://dynamodb-sage.hzcentre.com` in the json configue file of the MCP client (e.g. `opencode.json`, `claude_desktop_config.json`, etc.). Guardrails and risk analysis protect against abuse.
+> **Public demo server** available at `https://dynamodb-sage.hzcentre.com` — try it directly with any MCP client by replacing the URL with yours in the JSON config.
 
 > ⚠️ **Important**: The risk analyzer may return warnings for expensive or destructive operations (e.g. large scans, batch deletes, schema changes). Some MCP clients (including Claude) may auto-confirm these warnings without asking you. To prevent this, tell the LLM explicitly: *"If the server returns a risk warning, show it to me and ask for my confirmation before proceeding. Never auto-confirm."*
 
 ### opencode
-
-Add to `opencode.json` in your project root:
 
 ```json
 {
@@ -259,62 +209,20 @@ Add to `opencode.json` in your project root:
 
 ### Claude Desktop
 
-**Local (stdio):**
-
-The server loads `.env` automatically. When using `sh -c`, the working directory is the project root so `.env` is found — no env vars needed in config.
+**Local (stdio) — requires Docker stack running:**
 
 ```json
 {
   "mcpServers": {
     "dynamodb-sage-local": {
       "command": "sh",
-      "args": ["-c", "cd /path/to/dynamodb-sage && exec go run main.go"]
+      "args": ["-c", "cd /path/to/dynamodb-sage && KAFKA_BROKERS=localhost:9093 AWS_BASE_ENDPOINT=http://localhost:4566 AWS_REGION=eu-north-1 go run main.go"]
     }
   }
 }
 ```
 
-> Copy `.env.example` to `.env` and fill in your own credentials before starting.
-
-**Pre-built binary** (faster startup, but must pass env vars explicitly):
-
-```bash
-cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
-```
-
-```json
-{
-  "mcpServers": {
-    "dynamodb-sage-local": {
-      "command": "/tmp/dynamodb-sage",
-      "env": {
-        "LOCALSTACK_AUTH_TOKEN": "your_token_here",
-        "AWS_BASE_ENDPOINT": "http://localhost:4566",
-        "AWS_REGION": "eu-north-1",
-        "AWS_ACCESS_KEY_ID": "your_access_key",
-        "AWS_SECRET_ACCESS_KEY": "your_secret_key",
-        "CONFIG_PATH": "/path/to/dynamodb-sage/config.yaml",
-        "DYNAMO_SAGE_DB": "/path/to/dynamodb-sage/data/audit.db"
-      }
-    }
-  }
-}
-```
-
-**Remote AWS (via supergateway, SSE — for Claude Desktop):**
-
-```json
-{
-  "mcpServers": {
-    "dynamodb-sage-aws": {
-      "command": "npx",
-      "args": ["-y", "supergateway", "--sse", "https://dynamodb-sage.yourdomain.com/sse"]
-    }
-  }
-}
-```
-
-**Remote AWS (via supergateway, Streamable HTTP):**
+**Remote AWS (Streamable HTTP):**
 
 ```json
 {
@@ -327,133 +235,7 @@ cd /path/to/dynamodb-sage && go build -o /tmp/dynamodb-sage .
 }
 ```
 
-In the chat, ask natural language questions like:
-
-**Exploration**
-   - *"List all tables"*
-   - *"Describe the user table"*
-   - *"Show me the schema of every table"*
-
-**Create & Insert**
-   - *"Create a table called products with id as the primary key and a GSI on category"*
-   - *"Add a table orders with orderId as HASH, status as RANGE, and a GSI on status"*
-   - *"Put an item in the products table with id=p1, name=Widget, price=10, category=electronics"*
-   - *"Add 5 users with id, name and age fields"*
-   - *"Batch insert 100 sample products with random prices and categories"*
-
-**Query & Read**
-   - *"Get me the user with id=u1 and name=alice"*
-   - *"Find all products in the electronics category using the GSI"*
-   - *"Query the user table using the age-lsi index for users with age >= 25"*
-   - *"Check if anyone in the user table is over 80 years old"*
-   - *"Find all users whose name starts with 'b'"*
-   - *"Show me all orders with status=shipped"*
-   - *"Scan all items in the products table and tell me the average price"*
-
-**Update & Delete**
-   - *"Update the price of product p1 to 15"*
-   - *"Delete the user with id=u1 and name=alice"*
-   - *"Remove all products with price over 100"*
-   - *"Remove/delete a table called products"*
-
-**Monitoring**
-   - *"Show me the audit log"*
-   - *"What operations have been run recently?"*
-   - *"How much read capacity did my last query use?"*
-
-### Any MCP Client
-
-Use Streamable HTTP transport with the URL:
-```
-https://dynamodb-sage.yourdomain.com
-```
-
-### Glama MCP Inspector
-
-[Glama MCP Inspector](https://glama.ai/mcp/inspector) — test tools directly in the browser with syntax highlighting.
-
-1. Open [Glama MCP Inspector](https://glama.ai/mcp/inspector)
-2. Click **"Add Server"**
-3. URL: `https://dynamodb-sage.yourdomain.com` or you can use my public demo server at `https://dynamodb-sage.hzcentre.com`
-4. Click **"Connect"**
-
-**Tool call JSON examples (paste into the Arguments field):**
-
-`get_item` — fetch a single item by key:
-```json
-{
-  "tableName": "mcp_user",
-  "key": {
-    "id": "007",
-    "name": "bond"
-  }
-}
-```
-
-`put_item` — insert a new item:
-```json
-{
-  "tableName": "mcp_user",
-  "item": {
-    "id": "100",
-    "name": "test",
-    "age": 42
-  }
-}
-```
-
-`query_table` — query with optional index:
-```json
-{
-  "tableName": "mcp_user",
-  "keyCondition": "id = :id",
-  "expressionAttributeValues": {
-    ":id": "007"
-  }
-}
-```
-
-`query_table` with GSI:
-```json
-{
-  "tableName": "mcp_user",
-  "indexName": "age-lsi",
-  "keyCondition": "age >= :age",
-  "expressionAttributeValues": {
-    ":age": 30
-  }
-}
-```
-
-`update_item` — update fields with expressions:
-```json
-{
-  "tableName": "mcp_user",
-  "key": {
-    "id": "007",
-    "name": "bond"
-  },
-  "updateExpression": "SET age = :newAge",
-  "expressionAttributeValues": {
-    ":newAge": 46
-  }
-}
-```
-
-`delete_item` — delete by key:
-```json
-{
-  "tableName": "mcp_user",
-  "key": {
-    "id": "100",
-    "name": "test"
-  }
-}
-```
-
 ---
-
-
 
 ## Development Workflow
 
@@ -467,31 +249,8 @@ This project follows **GitHub Flow**:
 
 ---
 
-## Architecture
+## Related Documents
 
-Two deployment options are available:
-
-### Lightsail (Active — $5/mo)
-
-| Component | Detail |
-|-----------|--------|
-| **Region** | `eu-north-1` |
-| **Compute** | Lightsail `nano_3_0` (2 vCPU, 0.5 GiB, 20 GB SSD) |
-| **Port** | 8080 |
-| **Transport** | Streamable HTTP (POST `/`) + SSE (`GET /sse`), health at `/health` |
-| **HTTPS** | Let's Encrypt via certbot + nginx reverse proxy |
-| **Domain** | Your own domain (A record at DNS provider) |
-| **IAM** | Dedicated IAM user with `AmazonDynamoDBFullAccess` |
-| **Logs** | `journalctl -u dynamodb-sage` |
-
-### ECS + CloudFront (Archived — Reference)
-
-| Component | Detail |
-|-----------|--------|
-| **Region** | `eu-north-1` |
-| **Compute** | Fargate (0.25 vCPU, 0.5 GiB) |
-| **Port** | 8080 |
-| **Transport** | Streamable HTTP, health check at `/health` |
-| **HTTPS** | CloudFront (`*.cloudfront.net`) with auto-provisioned SSL |
-| **IAM** | DynamoDB full access + `sts:GetCallerIdentity` |
-| **Logs** | CloudWatch `/ecs/dynamodb-sage` (30-day retention) |
+- [Project flow diagram](project-flow.md) — detailed architecture walkthrough
+- [Kafka flow diagram](assets/kafka-flow.svg) — async job processing with Kafka
+- [Development plan](development-plan.md) — original design document

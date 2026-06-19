@@ -10,4 +10,4 @@ The architecture flow covers:
 4. **Async batch path** — write operations (batch_put, batch_delete) go through a worker pool with retry logic
 5. **Audit & analytics** — all operations are logged to the audit trail and analytics event stream
 
-![Architecture Flow](image-3.png)
+![Architecture Flow](image-flow.png)
