@@ -70,11 +70,11 @@ MCP Client (Claude/Cursor/etc)
    1. A client sends a tool request to the Go MCP server.
    2. The server runs synchronous guardrail and risk checks.
    3. If the request fails, the server returns an immediate synchronous alert.
-   4. If the request passes, the server publishes a heavy-operation task to Kafka topic `dynamo-sage-heavy-ops`.
-   5. A Kafka consumer group runs worker goroutines that execute the direct DynamoDB write.
-   6. After the write succeeds, the worker publishes a mutation event to Kafka topic `dynamo-sage-mutations`.
-   7. Analytics and audit sinks consume `dynamo-sage-mutations`.
-   8. If the audit sink detects raw PII or a policy violation, the MCP server sends a live notification to Claude/Cursor.
+   4. If the request passes, the server evaluates `srv.isLargeOperation(req)`.
+   5. **Large operation**: the server enqueues a job to Kafka topic `dynamo-sage-heavy-ops` (or falls back to the in‑process queue) and immediately returns a queued‑acknowledgment.
+   6. **Small operation**: the server executes the DynamoDB call synchronously and returns the result directly.
+   7. The Kafka worker consumes the heavy‑op job, performs the DynamoDB write, and then publishes a mutation event to the `dynamo-sage-mutations` topic.
+   8. Audit and analytics sinks consume `dynamo-sage-mutations`; if a violation (e.g., raw PII) is detected, the MCP server emits a live notification to the developer via the `notifications/message` tool.
 
    **How Kafka benefits the MCP server**
 

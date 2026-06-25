@@ -3,13 +3,13 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"dynamodb-sage/internal/audit"
 	"dynamodb-sage/internal/engine"
 	"dynamodb-sage/internal/kafka"
 	"dynamodb-sage/internal/queue"
 	"dynamodb-sage/internal/risk"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -37,7 +37,7 @@ type Server struct {
 	mcpCtx        context.Context
 	mcpCancel     context.CancelFunc
 	jobStorage    sync.Map
-	kafkaProducer *kafkapkg.Producer
+	kafkaClient   *kafkapkg.Client
 }
 
 type AuditBackend interface {
@@ -69,7 +69,7 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 		userARN:      userARN,
 		riskAnalyzer: riskAnalyzer,
 	}
-	if err := srv.InitKafkaProducer(kafkaConfigPath); err != nil {
+	if err := srv.initKafkaClient(kafkaConfigPath); err != nil {
 		srv.startWorkerPool()
 		log.Printf("In-process queue started: %v", err)
 	}
@@ -143,23 +143,23 @@ func (srv *Server) RecordActionLog(backend AuditBackend, entry audit.AuditEntry)
 	backend.LogActivity(entry)
 }
 
-func (srv *Server) InitKafkaProducer(kafkaConfigPath string) error {
+func (srv *Server) initKafkaClient(kafkaConfigPath string) error {
 	kafkaConfig, err := kafka.LoadConfig(kafkaConfigPath)
 	if err != nil {
 		return err
 	}
 	if !kafkaConfig.Enabled {
-		return fmt.Errorf("kafka producer disabled")
+		return fmt.Errorf("kafka client disabled")
 	}
 
-	kafkaProducer, err := kafkapkg.NewProducer(kafkaConfig.Brokers, kafkaConfig.Topics["heavy_ops"], kafkaConfig.ConsumerGroupName, srv.processHeavyOp)
+	kafkaClient, err := kafkapkg.NewClient(kafkaConfig.Brokers, kafkaConfig.Topics["heavy_ops"], kafkaConfig.ConsumerGroupName, srv.processHeavyOp)
 	if err != nil {
 		return err
 	}
 
-	srv.kafkaProducer = kafkaProducer
+	srv.kafkaClient = kafkaClient
 	go func() {
-		if err := srv.kafkaProducer.Start(); err != nil {
+		if err := srv.kafkaClient.Start(); err != nil {
 			log.Printf("Failed to start kafka producer: %v", err)
 		}
 	}()
@@ -257,8 +257,8 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 	if srv.mcpCancel != nil {
 		srv.mcpCancel()
 	}
-	if srv.kafkaProducer != nil {
-		srv.kafkaProducer.GracefulStop()
+	if srv.kafkaClient != nil {
+		srv.kafkaClient.Close()
 	}
 	return nil
 }
