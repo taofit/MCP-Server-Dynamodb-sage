@@ -57,10 +57,12 @@ LOCALSTACK_AUTH_TOKEN=your_token_here
 3. Start the full development stack:
 
 ```bash
-docker compose --profile local up -d
+docker compose --profile local up -d --build
 ```
 
-This starts the Go app, Kafka (with Zookeeper), and LocalStack.
+This starts the Go app, Kafka (with Zookeeper), and LocalStack. The `--build` flag ensures your latest local code changes are compiled into the Docker image before starting.
+
+> **Troubleshooting:** If Kafka exits with `KeeperErrorCode = NodeExists`, stale broker data is left in Zookeeper. Run `docker compose --profile local down && docker compose --profile local up -d` to restart with a clean state.
 
 4. Verify the services are healthy:
 
@@ -87,6 +89,7 @@ AWS_REGION=eu-north-1 \
 AWS_ACCESS_KEY_ID=your_key_id \
 AWS_SECRET_ACCESS_KEY=your_secret_key \
 MCP_TRANSPORT_MODE=http \
+DYNAMO_SAGE_ADDR=":8081" \
 go run main.go
 ```
 
@@ -97,7 +100,10 @@ You can change the listen address for the Go binary by setting the `DYNAMO_SAGE_
 ### Test with MCP Inspector
 
 ```bash
+# using docker compose
 npx @modelcontextprotocol/inspector --transport http http://localhost:8080
+# or using local binary
+npx @modelcontextprotocol/inspector --transport http http://localhost:8081
 ```
 
 ---

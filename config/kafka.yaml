@@ -2,7 +2,8 @@ enabled: true
 brokers:
   - localhost:9092
 topics:
-  heavy_ops: heavy-operations
-  audit_log: audit-events
+  heavy_ops: dynamodb-sage-heavy-ops
+  audit_log: dynamodb-sage-audit-log
+  notifications: dynamodb-sage-notifications
 consumerGroupName: dynamodb-sage-workers
 partitions: 3

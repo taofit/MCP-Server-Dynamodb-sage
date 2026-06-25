@@ -803,9 +803,9 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 				return srv.errorResult(fmt.Sprintf("failed to marshal input: %v", err)), empty, nil
 			}
 
-			if srv.kafkaProducer != nil {
+			if srv.kafkaClient != nil {
 				log.Printf("kafka producer is not nil, enqueueing task: %s", id)
-				srv.kafkaProducer.EnqueueTask(id, inputPayload)
+				srv.kafkaClient.Send(id, inputPayload)
 			} else {
 				log.Printf("kafka producer is nil, using go's native queue: %s", id)
 				srv.queue.Submit(func(ctx context.Context) error {
