@@ -59,7 +59,7 @@ MCP Client (Claude/Cursor/etc)
    - `internal/audit/` — logger, entry model, SQLite queries
    - MCP tool `read_audit_logs` with time range + limit filters
 
-7. Kafka event pipeline and proactive MCP notifications — async writes, audit analytics, and live alerts:
+7. Kafka event pipeline and async notifications — durable heavy ops, job result polling, and desktop alerts:
 
    **Kafka flow**
 
@@ -69,49 +69,49 @@ MCP Client (Claude/Cursor/etc)
 
    1. A client sends a tool request to the Go MCP server.
    2. The server runs synchronous guardrail and risk checks.
-   3. If the request fails, the server returns an immediate synchronous alert.
+   3. If the request fails, the server returns an immediate synchronous error.
    4. If the request passes, the server evaluates `srv.isLargeOperation(req)`.
-   5. **Large operation**: the server enqueues a job to Kafka topic `dynamo-sage-heavy-ops` (or falls back to the in‑process queue) and immediately returns a queued‑acknowledgment.
+   5. **Large operation** (batch_put_items, batch_delete_items, create_optimized_table): the server generates a UUID, stores a `JobResult` in `srv.jobStorage`, and enqueues the job to Kafka topic `dynamodb-sage-heavy-ops`. It immediately returns a queued acknowledgment with the job ID.
    6. **Small operation**: the server executes the DynamoDB call synchronously and returns the result directly.
-   7. The Kafka worker consumes the heavy‑op job, performs the DynamoDB write, and then publishes a mutation event to the `dynamo-sage-mutations` topic.
-   8. Audit and analytics sinks consume `dynamo-sage-mutations`; if a violation (e.g., raw PII) is detected, the MCP server emits a live notification to the developer via the `notifications/message` tool.
+   7. The Kafka consumer (multi‑topic, single consumer group `dynamodb-sage-workers`) picks up the heavy‑op job via `ConsumeClaim`, dispatches to `processHeavyOp`, which calls `executeJobOp` to perform the actual DynamoDB operation.
+   8. On completion, `processHeavyOp` publishes a notification to the `dynamodb-sage-notifications` topic with the table name, operation, severity (`"success"` or `"error"`), and a message.
+   9. The same consumer group also subscribes to `dynamodb-sage-notifications`. Notifications are handled by `processNotification`, which calls `SendUINotify` (currently a macOS notification via `osascript`).
+   10. The client polls `get_job_result` with the job ID to retrieve the final result from `srv.jobStorage`.
+   11. If Kafka is unavailable (`initKafkaClient` fails), the server falls back to an in‑process goroutine pool (`processHeavyOpForQueue`) which skips notifications entirely.
 
    **How Kafka benefits the MCP server**
 
-   The MCP server is the entry point that LLM-driven tools call to work with DynamoDB. Most operations are fast, such as list tables or get item, but heavy-weight tasks like batch writes, scans, restores, or risk-analysed jobs can run for seconds or minutes. Kafka moves those heavy operations out of the request path and into a durable event pipeline.
+   The MCP server is the entry point that LLM-driven tools call to work with DynamoDB. Most operations are fast, such as list tables or get item, but heavy-weight tasks like batch writes, batch deletes, or table creation can run for seconds or minutes. Kafka moves those heavy operations out of the request path and into a durable event pipeline.
 
-   - `dynamo-sage-heavy-ops` is the task ingress topic.
-   - `dynamo-sage-mutations` is the egress and audit stream after DynamoDB writes complete.
+   - `dynamodb-sage-heavy-ops` is the task ingress topic (3 partitions, auto‑created).
+   - `dynamodb-sage-notifications` is the egress topic for operation results (auto‑created).
    - Kafka consumer group replicas can scale worker concurrency horizontally.
    - Failed workers do not lose jobs because Kafka retains messages for replay.
    - Consumer lag and partition offsets provide operational visibility into backlog and saturation.
    - The MCP API remains fast because the client receives an immediate queued acknowledgment instead of waiting for long-running work.
 
-   **Security and notification behavior**
+   **Notification behavior**
 
-   After a write succeeds, the mutation event is published to `dynamo-sage-mutations`. Audit and analytics sinks consume that stream. If the audit sink detects raw PII, unencrypted secrets, or another policy violation, the MCP server emits a live notification through `srv.SendNotification()`.
+   After a heavy op completes (success or error), a notification is published to `dynamodb-sage-notifications`. The same consumer group processes it and triggers a desktop alert. This confirms completion even if the LLM client has been restarted.
 
-   Example live alert:
-
-   ```text
-   ⚠️ SECURITY ALERT: Background stream detected raw PII written to table Users!
-   ```
-
-   This notification reaches both the human developer and the LLM agent. In Claude Desktop it can appear in the developer log or active UI pane. In Cursor or another advanced IDE interface it can surface as an environmental toast warning or alert banner in the chat sidebar.
-
-   **AI agent reaction**
-
-   MCP standard notifications such as `notifications/message` are visible to the underlying LLM agent controlling the workspace. When Kafka drops an alert into the stream:
-
-   - The LLM context window is updated with the notification text.
-   - The agent can stop its current task and react to the alert.
-   - The agent can ask the human whether to remediate, for example:
+   Example macOS alert:
 
    ```text
-   I just detected that another application pushed unencrypted PII into our table via the background Kafka stream. Should I write a migration script or call delete_item to wipe that record for security compliance?
+   ✅ Job on table "Users" for operation "batch_put_items" has been completed successfully
    ```
 
-   **Bottom line:** Kafka makes the MCP server scalable, resilient, observable, and proactive. Heavy operations become durable jobs, DynamoDB mutations become replayable audit events, and security findings become live alerts that both the human and the AI agent can act on immediately.
+   ❌ On failure:
+
+   ```text
+   ❌ batch_put_items failed: ...
+   ```
+
+   **Planned / not yet implemented**
+
+   - **Mutation audit stream** (`dynamodb-sage-mutations`) — a dedicated topic for all DynamoDB write events, consumed by an audit sink that enriches and indexes mutation history for compliance and replay.
+   - **PII / security violation detection** — an analytics consumer that inspects mutation payloads for raw PII or unencrypted secrets and emits live alerts via `notifications/message`.
+   - **AI agent reaction** — surfacing security alerts to the LLM agent's context window so it can autonomously propose remediation (e.g., `delete_item` to wipe exposed records).
+   - **Multi-channel notifications** — extend `SendNotification` beyond macOS to Slack, email, or webhook sinks (configurable per severity).
 
 8. Multi-tenant isolation — per-team API keys, separate audit logs, table namespacing:
    - `internal/auth/apikeys.go` — API key generation and validation
