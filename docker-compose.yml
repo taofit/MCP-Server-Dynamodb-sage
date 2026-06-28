@@ -70,6 +70,7 @@ services:
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_DELETE_TOPIC_ENABLE=true
     healthcheck:
       test: ["CMD", "bash", "-c", "nc -z kafka 9092"]
       interval: 5s
@@ -85,4 +86,4 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    command: ["kafka-topics", "--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "heavy-operations", "--replication-factor", "1", "--partitions", "3"]
+    command: ["kafka-topics", "--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "dynamodb-sage-heavy-ops", "--replication-factor", "1", "--partitions", "3"]

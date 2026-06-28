@@ -1,42 +1,42 @@
 // Package kafka provides a thin wrapper around a Sarama sync producer for enqueuing heavy DynamoDB‑Sage tasks.
 package kafka
 
-import "github.com/IBM/sarama"
+import (
+	"github.com/IBM/sarama"
+)
 
 type Producer interface {
-	Send(key string, payload []byte) error
+	Send(topic string, key string, payload []byte) error
 	Close() error
 }
 
 type saramaProducer struct {
 	producer sarama.SyncProducer
-	topic    string
 	brokers  []string
 }
 
-type SaramaProducerConfig struct {
-	Brokers []string
-	Topic   string
+type saramaProducerConfig struct {
+	brokers []string
 }
 
-func NewProducer(cfg *SaramaProducerConfig) (Producer, error) {
+func newProducer(cfg *saramaProducerConfig) (Producer, error) {
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Producer.RequiredAcks = sarama.WaitForAll
 	saramaConfig.Producer.Return.Successes = true
 	saramaConfig.Producer.Return.Errors = true
 	saramaConfig.Producer.Retry.Max = 3
 
-	producer, err := sarama.NewSyncProducer(cfg.Brokers, saramaConfig)
+	producer, err := sarama.NewSyncProducer(cfg.brokers, saramaConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	return &saramaProducer{producer: producer, topic: cfg.Topic, brokers: cfg.Brokers}, nil
+	return &saramaProducer{producer: producer, brokers: cfg.brokers}, nil
 }
 
-func (p *saramaProducer) Send(key string, payload []byte) error {
+func (p *saramaProducer) Send(topic string, key string, payload []byte) error {
 	msg := &sarama.ProducerMessage{
-		Topic: p.topic,
+		Topic: topic,
 		Key:   sarama.StringEncoder(key),
 		Value: sarama.ByteEncoder(payload),
 	}

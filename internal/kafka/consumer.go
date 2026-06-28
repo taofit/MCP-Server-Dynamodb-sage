@@ -13,32 +13,36 @@ import (
 type Consumer interface {
 	Start() error
 	GracefulStop() error
+	RegisterHandler(topic string, handler Handler)
 }
+
+type Handler func(key string, payload []byte) error
 
 type saramaConsumer struct {
 	ready             chan struct{}
-	processTask       func(key string, payload []byte) error
+	handlersMu        sync.RWMutex
+	handlers          map[string]Handler
 	brokers           []string
-	topic             string
+	topics            []string
 	consumerGroupName string
 	consumerGroup     sarama.ConsumerGroup
 	runCancel         context.CancelFunc
 	wg                sync.WaitGroup
 }
 
-type ConsumerConfig struct {
-	Brokers           []string
-	Topic             string
-	ConsumerGroupName string
-	ProcessTask       func(key string, payload []byte) error
+type consumerConfig struct {
+	brokers           []string
+	topics            []string
+	consumerGroupName string
 }
 
-func NewConsumer(config *ConsumerConfig) (Consumer, error) {
+func newConsumer(config *consumerConfig) (Consumer, error) {
+	handlers := make(map[string]Handler)
 	return &saramaConsumer{
-		processTask:       config.ProcessTask,
-		brokers:           config.Brokers,
-		topic:             config.Topic,
-		consumerGroupName: config.ConsumerGroupName,
+		handlers:          handlers,
+		brokers:           config.brokers,
+		topics:            config.topics,
+		consumerGroupName: config.consumerGroupName,
 		ready:             make(chan struct{}, 1),
 	}, nil
 }
@@ -63,9 +67,12 @@ func (c *saramaConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 				log.Printf("Message channel was closed")
 				return nil
 			}
-			log.Printf("Message claimed: key = %s, value = %s, topic = %s", string(message.Key), string(message.Value), message.Topic)
-			if c.processTask != nil {
-				if err := c.processTask(string(message.Key), message.Value); err != nil {
+			log.Printf("Message claimed: topic=%s key=%q", message.Topic, string(message.Key))
+			c.handlersMu.RLock()
+			handler, ok := c.handlers[message.Topic]
+			c.handlersMu.RUnlock()
+			if ok && handler != nil {
+				if err := handler(string(message.Key), message.Value); err != nil {
 					log.Printf("Error processing task key=%s: %v", string(message.Key), err)
 				}
 			}
@@ -85,8 +92,9 @@ func (c *saramaConsumer) Start() error {
 	config.Producer.Return.Successes = true
 	config.Producer.Retry.Max = 3
 	config.Version = sarama.V2_8_0_0
+	config.Consumer.Group.Session.Timeout = 30 * time.Second // default is 10 s
+	config.Consumer.Group.Heartbeat.Interval = 3 * time.Second
 
-	// Using broker list from Producer struct (set by NewProducer)
 	log.Printf("Kafka consumer initializing with brokers: %v", c.brokers)
 	consumerGroup, err := sarama.NewConsumerGroup(c.brokers, c.consumerGroupName, config)
 	if err != nil {
@@ -97,9 +105,8 @@ func (c *saramaConsumer) Start() error {
 	go func() {
 		defer c.wg.Done()
 		for {
-			if err := c.consumerGroup.Consume(ctx, []string{c.topic}, c); err != nil {
+			if err := c.consumerGroup.Consume(ctx, c.topics, c); err != nil {
 				log.Printf("Error from consumer: %v", err)
-				// Add a delay to prevent tight loop on persistent error
 				time.Sleep(5 * time.Second)
 			}
 			if ctx.Err() != nil {
@@ -116,6 +123,12 @@ func (c *saramaConsumer) Start() error {
 	case <-time.After(30 * time.Second):
 		return fmt.Errorf("timeout waiting for consumer to be ready")
 	}
+}
+
+func (c *saramaConsumer) RegisterHandler(topic string, handler Handler) {
+	c.handlersMu.Lock()
+	defer c.handlersMu.Unlock()
+	c.handlers[topic] = handler
 }
 
 func (c *saramaConsumer) GracefulStop() error {

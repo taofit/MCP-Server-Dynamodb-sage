@@ -5,33 +5,39 @@ import (
 )
 
 type Client struct {
+	// implements KafkaClient interface in server package
 	Producer
 	Consumer
+	Config *KafkaConfig
 }
 
-func NewClient(brokers []string, topic string, consumerGroupName string, processTask func(key string, payload []byte) error) (*Client, error) {
-	producerConfig := &SaramaProducerConfig{
-		Brokers: brokers,
-		Topic:   topic,
+func NewClient(kafkaConfig *KafkaConfig) (*Client, error) {
+	producerConfig := &saramaProducerConfig{
+		brokers: kafkaConfig.Brokers,
 	}
-	p, err := NewProducer(producerConfig)
+	p, err := newProducer(producerConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create producer: %v", err)
 	}
-
-	consumerConfig := &ConsumerConfig{
-		Brokers:           brokers,
-		Topic:             topic,
-		ConsumerGroupName: consumerGroupName,
-		ProcessTask:       processTask,
+	var topics []string
+	for _, topic := range kafkaConfig.Topics {
+		if topic != "" {
+			topics = append(topics, topic)
+		}
 	}
-	c, err := NewConsumer(consumerConfig)
+
+	c, err := newConsumer(&consumerConfig{
+		brokers:           kafkaConfig.Brokers,
+		topics:            topics,
+		consumerGroupName: kafkaConfig.ConsumerGroupName,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consumer: %v", err)
 	}
 	return &Client{
 		Producer: p,
 		Consumer: c,
+		Config:   kafkaConfig,
 	}, nil
 }
 

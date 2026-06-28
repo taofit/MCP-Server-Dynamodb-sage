@@ -35,7 +35,8 @@ cd "$DIR"
 
 echo ""
 echo "=== Step 4: Build Go binary for linux/amd64 (locally) ==="
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "/tmp/${APP_NAME}" .
+VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}"
+GOOS=linux GOARCH=amd64 go build -ldflags="-X dynamodb-sage/server.Version=${VERSION} -s -w" -o "/tmp/${APP_NAME}" .
 echo "  Built: /tmp/${APP_NAME}"
 
 echo ""

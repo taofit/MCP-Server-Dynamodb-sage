@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-
-	// "log"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -805,11 +803,15 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 
 			if srv.kafkaClient != nil {
 				log.Printf("kafka producer is not nil, enqueueing task: %s", id)
-				srv.kafkaClient.Send(id, inputPayload)
+				if err := srv.kafkaClient.Send(srv.heavyOpsTopic, id, inputPayload); err != nil {
+					log.Printf("failed to send task to Kafka: %v", err)
+					var empty Out
+					return srv.errorResult(fmt.Sprintf("failed to enqueue task to Kafka: %v", err)), empty, nil
+				}
 			} else {
 				log.Printf("kafka producer is nil, using go's native queue: %s", id)
 				srv.queue.Submit(func(ctx context.Context) error {
-					return srv.processHeavyOp(id, inputPayload)
+					return srv.processHeavyOpForQueue(id, inputPayload)
 				})
 			}
 
