@@ -12,7 +12,7 @@ Key differentiators:
 - **Audit trail**: every DynamoDB operation logged with principal, timestamp, and throughput
 - **No direct SQL/NoSQL injection**: structured tool calls only
 
-[![Demo Video](https://img.youtube.com/vi/f4i8fxrdEBw/maxresdefault.jpg)](https://www.youtube.com/watch?v=f4i8fxrdEBw)
+[![DynamoDB Sage Architecture](assets/hero.svg)](https://www.youtube.com/watch?v=f4i8fxrdEBw)
 
 <details>
 <summary><b>🗺️ View Architecture Flow Diagram</b></summary>

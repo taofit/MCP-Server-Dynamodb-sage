@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="500" viewBox="0 0 1000 500" role="img" aria-labelledby="title desc">
+  <title id="title">DynamoDB Sage — Security-first MCP Gateway for DynamoDB</title>
+  <desc id="desc">An AI Assistant sends tool requests to the DynamoDB Sage MCP server. Two-layer protection (Risk Analyzer + Guardrails) inspects every operation. Small operations go directly to DynamoDB. Large operations are queued via Apache Kafka for async background processing. Results are notified via macOS desktop alerts. All actions are audited.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="kafka" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </linearGradient>
+    <linearGradient id="dynamo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-fail" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#e11d48"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#059669"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#f59e0b"/>
+    </marker>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1000" height="500" fill="url(#bg)"/>
+
+  <!-- Decorative grid lines -->
+  <g opacity="0.05" stroke="#ffffff">
+    <line x1="0" y1="100" x2="1000" y2="100" stroke-width="1"/>
+    <line x1="0" y1="200" x2="1000" y2="200" stroke-width="1"/>
+    <line x1="0" y1="300" x2="1000" y2="300" stroke-width="1"/>
+    <line x1="0" y1="400" x2="1000" y2="400" stroke-width="1"/>
+  </g>
+
+  <!-- Title -->
+  <text x="500" y="45" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="700" fill="#f8fafc" letter-spacing="1">DynamoDB Sage</text>
+  <text x="500" y="70" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="#94a3b8" letter-spacing="2">Security-first MCP Gateway for Amazon DynamoDB</text>
+
+  <!-- ═══════════ Column 1: AI Assistant ═══════════ -->
+  <rect x="60" y="110" width="220" height="280" rx="16" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+  <rect x="60" y="110" width="220" height="50" rx="16" fill="#2563eb"/>
+  <rect x="60" y="142" width="220" height="18" fill="#2563eb"/>
+  <text x="170" y="142" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#ffffff">AI Assistant</text>
+
+  <!-- Chat bubbles -->
+  <rect x="85" y="180" width="170" height="32" rx="8" fill="#334155"/>
+  <text x="95" y="200" font-family="system-ui, sans-serif" font-size="12" fill="#e2e8f0">🔍 Scan Users table</text>
+
+  <rect x="85" y="222" width="170" height="32" rx="8" fill="#334155"/>
+  <text x="95" y="242" font-family="system-ui, sans-serif" font-size="12" fill="#e2e8f0">📝 Batch put 500 items</text>
+
+  <rect x="85" y="264" width="170" height="32" rx="8" fill="#334155"/>
+  <text x="95" y="284" font-family="system-ui, sans-serif" font-size="12" fill="#e2e8f0">🗑️ Delete 100 records</text>
+
+  <rect x="85" y="306" width="170" height="32" rx="8" fill="#334155"/>
+  <text x="95" y="326" font-family="system-ui, sans-serif" font-size="12" fill="#e2e8f0">⚡ Create new table</text>
+
+  <rect x="85" y="348" width="170" height="32" rx="8" fill="#1e40af"/>
+  <text x="95" y="368" font-family="system-ui, sans-serif" font-size="12" fill="#93c5fd">⬆️ get_job_result(id)</text>
+
+  <!-- Arrow from AI to Server -->
+  <path d="M280 250 L340 250" stroke="#475569" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="310" y="240" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">MCP</text>
+
+  <!-- ═══════════ Column 2: dynamo-sage Server ═══════════ -->
+  <rect x="360" y="110" width="280" height="340" rx="16" fill="#0f172a" stroke="#2563eb" stroke-width="2" filter="url(#glow)"/>
+
+  <!-- Server header -->
+  <rect x="360" y="110" width="280" height="50" rx="16" fill="url(#shield)"/>
+  <rect x="360" y="142" width="280" height="18" fill="url(#shield)"/>
+  <text x="500" y="142" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#ffffff">🛡️ dynamo-sage</text>
+
+  <!-- Layer 1: Risk Analyzer -->
+  <rect x="385" y="180" width="230" height="55" rx="10" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="500" y="203" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#fbbf24">Risk Analyzer</text>
+  <text x="500" y="223" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">cost estimation · size check · harm detection</text>
+
+  <!-- Arrow down -->
+  <path d="M500 235 L500 250" stroke="#475569" stroke-width="2" fill="none"/>
+
+  <!-- Layer 2: Guardrails -->
+  <rect x="385" y="250" width="230" height="55" rx="10" fill="#1e293b" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="500" y="273" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#60a5fa">Guardrails</text>
+  <text x="500" y="293" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">protected tables · schema · tags · limits</text>
+
+  <!-- Fork -->
+  <path d="M500 305 L500 320" stroke="#475569" stroke-width="2" fill="none"/>
+  <line x1="450" y1="320" x2="550" y2="320" stroke="#475569" stroke-width="2" fill="none"/>
+
+  <!-- Sync branch -->
+  <text x="430" y="310" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#22c55e">small op</text>
+  <path d="M450 320 L450 340 L230 340 L230 430" stroke="#22c55e" stroke-width="2" fill="none" stroke-dasharray="4 3" marker-end="url(#arrow-green)"/>
+
+  <!-- Async branch -->
+  <text x="540" y="310" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#f59e0b">large op</text>
+  <path d="M550 320 L550 340 L720 340 L720 430" stroke="#f59e0b" stroke-width="2" fill="none" stroke-dasharray="4 3" marker-end="url(#arrow-orange)"/>
+
+  <!-- Small op label -->
+  <rect x="385" y="335" width="230" height="45" rx="8" fill="#064e3b" stroke="#22c55e" stroke-width="1"/>
+  <text x="500" y="355" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#4ade80">⚡ Sync: Execute Directly</text>
+  <text x="500" y="372" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">get / put / query / scan / delete / update</text>
+
+  <!-- Large op label -->
+  <rect x="385" y="395" width="230" height="45" rx="8" fill="#451a03" stroke="#f59e0b" stroke-width="1"/>
+  <text x="500" y="415" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#fbbf24">⏳ Async: Queue via Kafka</text>
+  <text x="500" y="432" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">batch_put / batch_delete / create_table</text>
+
+  <!-- ═══════════ Column 3: DynamoDB ═══════════ -->
+  <rect x="60" y="420" width="400" height="55" rx="12" fill="url(#dynamo)" opacity="0.9"/>
+  <text x="260" y="448" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Amazon DynamoDB</text>
+  <text x="260" y="466" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#fef3c7">Tables · Indexes · Streams · TTL</text>
+
+  <!-- ═══════════ Kafka + Notifications (right side) ═══════════ -->
+  <rect x="720" y="110" width="220" height="280" rx="16" fill="#1e293b" stroke="#059669" stroke-width="2"/>
+
+  <!-- Kafka header -->
+  <rect x="720" y="110" width="220" height="50" rx="16" fill="url(#kafka)"/>
+  <rect x="720" y="142" width="220" height="18" fill="url(#kafka)"/>
+  <text x="830" y="142" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#ffffff">📬 Apache Kafka</text>
+
+  <!-- heavy-ops topic -->
+  <rect x="745" y="180" width="170" height="45" rx="8" fill="#064e3b" stroke="#059669" stroke-width="1"/>
+  <text x="830" y="200" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#6ee7b7">dynamodb-sage-heavy-ops</text>
+  <text x="830" y="217" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">task ingress</text>
+
+  <!-- Arrow down -->
+  <path d="M830 225 L830 240" stroke="#475569" stroke-width="2" fill="none"/>
+
+  <!-- Consumer -->
+  <rect x="745" y="240" width="170" height="45" rx="8" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  <text x="830" y="260" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#60a5fa">Consumer Worker</text>
+  <text x="830" y="277" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">executeJobOp()</text>
+
+  <!-- Arrow down -->
+  <path d="M830 285 L830 300" stroke="#475569" stroke-width="2" fill="none"/>
+
+  <!-- notifications topic -->
+  <rect x="745" y="300" width="170" height="45" rx="8" fill="#451a03" stroke="#f59e0b" stroke-width="1"/>
+  <text x="830" y="320" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#fbbf24">dynamodb-sage-notifications</text>
+  <text x="830" y="337" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">result egress</text>
+
+  <!-- macOS Notification -->
+  <rect x="720" y="420" width="220" height="55" rx="12" fill="#881337" stroke="#e11d48" stroke-width="1.5"/>
+  <text x="830" y="448" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#fca5a5">🔔 Desktop Alert</text>
+  <text x="830" y="466" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">macOS notification via osascript</text>
+
+  <!-- Arrow: notifications → macOS -->
+  <path d="M830 345 L830 420" stroke="#e11d48" stroke-width="2" fill="none" marker-end="url(#arrow-fail)"/>
+
+  <!-- Kafka → DynamoDB arrow -->
+  <path d="M830 285 L830 300 L920 300 L920 447 L460 447" stroke="#059669" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#arrow-green)"/>
+  <text x="920" y="380" font-family="system-ui, sans-serif" font-size="10" fill="#6ee7b7">writes result</text>
+
+  <!-- Polling arrow (dotted, curved) -->
+  <path d="M170 380 L170 410 L830 410 L830 345" stroke="#93c5fd" stroke-width="2" fill="none" stroke-dasharray="4 4" marker-end="url(#arrow)"/>
+  <text x="500" y="400" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#93c5fd">get_job_result(id) polling</text>
+
+  <!-- Bottom tagline -->
+  <text x="500" y="490" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="#64748b">Every operation is risk-analyzed, guardrailed, and audited — no direct SQL/NoSQL injection</text>
+</svg>
