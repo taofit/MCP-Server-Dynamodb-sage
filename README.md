@@ -17,7 +17,7 @@ Key differentiators:
 <details>
 <summary><b>🗺️ View Architecture Flow Diagram</b></summary>
 
-<img src="image-flow.png" width="700" alt="Architecture Flow Diagram"/>
+<img src="assets/architecture-flow.svg" width="900" alt="Architecture Flow Diagram"/>
 
 *Full description in [project-flow.md](project-flow.md)*
 </details>
