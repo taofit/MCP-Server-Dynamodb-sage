@@ -150,6 +150,16 @@ curl https://dynamodb-sage.yourdomain.com/health
 # → ok
 ```
 
+### Versioning
+
+The binary embeds a version from `git describe --tags --always`. Tag before deploying:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+No tags → falls back to commit hash → `"dev"`. Set `VERSION=...` env var to override.
+
 ### Redeploy after code changes
 
 ```bash

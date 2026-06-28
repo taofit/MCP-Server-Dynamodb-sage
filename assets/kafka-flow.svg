@@ -1,97 +1,164 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
-  <title id="title">DynamoDB Sage Kafka flow</title>
-  <desc id="desc">MCP tool request passes guardrails, publishes to heavy-ops Kafka topic, workers write to DynamoDB, mutations are published to mutations topic, audit detects PII and sends live MCP notification.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-labelledby="title desc">
+  <title id="title">DynamoDB Sage Kafka Flow</title>
+  <desc id="desc">Tool request passes guardrails, job is stored and published to dynamodb-sage-heavy-ops Kafka topic. Consumer processes the job, executes the DynamoDB operation, and publishes a notification to dynamodb-sage-notifications. Another consumer handler displays a macOS notification.</desc>
 
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
       <path d="M2,2 L10,6 L2,10 Z" fill="#475569"/>
     </marker>
+    <marker id="arrow-fail" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#e11d48"/>
+    </marker>
     <style>
-      .box { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; rx: 14; }
-      .decision { fill: #fef3c7; stroke: #d97706; stroke-width: 2; rx: 14; }
+      .box { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; rx: 12; }
+      .decision { fill: #fef3c7; stroke: #d97706; stroke-width: 2; rx: 12; }
       .topic { fill: #ecfdf5; stroke: #059669; stroke-width: 2; rx: 18; }
-      .alert { fill: #fff1f2; stroke: #e11d48; stroke-width: 2; rx: 14; }
+      .alert { fill: #fff1f2; stroke: #e11d48; stroke-width: 2; rx: 12; }
+      .storage { fill: #f5f3ff; stroke: #7c3aed; stroke-width: 2; rx: 12; }
       .text { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 20px; fill: #0f172a; font-weight: 600; }
-      .small { font-size: 16px; fill: #475569; font-weight: 500; }
-      .label { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 16px; fill: #334155; font-weight: 600; }
+      .small { font-size: 15px; fill: #475569; font-weight: 500; }
+      .label { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 15px; fill: #334155; font-weight: 600; }
       .arrow { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
       .dashed { stroke: #64748b; stroke-width: 2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrow); }
+      .section { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 18px; fill: #94a3b8; font-weight: 700; letter-spacing: 1px; }
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1400" height="760" fill="#ffffff"/>
+  <rect x="0" y="0" width="1400" height="820" fill="#ffffff"/>
   <text x="40" y="48" class="text" font-size="30">DynamoDB Sage Kafka Flow</text>
 
-  <rect x="40" y="90" width="220" height="70" class="box"/>
-  <text x="150" y="122" text-anchor="middle" class="text">Go MCP Server</text>
-  <text x="150" y="148" text-anchor="middle" class="small">Tool Request</text>
+  <!-- Section labels -->
+  <text x="40" y="82" class="section">1. TOOL REQUEST</text>
+  <text x="40" y="222" class="section">2. ASYNC EXECUTION</text>
+  <text x="40" y="535" class="section">3. RESULT NOTIFICATION</text>
 
-  <rect x="340" y="90" width="250" height="70" class="decision"/>
-  <text x="465" y="122" text-anchor="middle" class="text">Guardrail + Risk</text>
-  <text x="465" y="148" text-anchor="middle" class="small">Analysis</text>
+  <!-- ═══════════ TOOL REQUEST ═══════════ -->
 
-  <rect x="670" y="90" width="250" height="70" class="box"/>
-  <text x="795" y="122" text-anchor="middle" class="text">Kafka Producer</text>
-  <text x="795" y="148" text-anchor="middle" class="small">Publish heavy op</text>
+  <!-- Go MCP Server -->
+  <rect x="60" y="100" width="230" height="65" class="box"/>
+  <text x="175" y="132" text-anchor="middle" class="text">Go MCP Server</text>
+  <text x="175" y="153" text-anchor="middle" class="small">Tool Request</text>
 
-  <rect x="1010" y="90" width="300" height="70" class="topic"/>
-  <text x="1160" y="122" text-anchor="middle" class="text">Topic 1</text>
-  <text x="1160" y="148" text-anchor="middle" class="small">dynamo-sage-heavy-ops</text>
+  <!-- Guardrail + Risk Analysis -->
+  <rect x="350" y="100" width="250" height="65" class="decision"/>
+  <text x="475" y="132" text-anchor="middle" class="text">Guardrail + Risk</text>
+  <text x="475" y="153" text-anchor="middle" class="small">checkRisk()</text>
 
-  <rect x="340" y="250" width="250" height="78" class="alert"/>
-  <text x="465" y="285" text-anchor="middle" class="text">Synchronous Response</text>
-  <text x="465" y="313" text-anchor="middle" class="small">Immediate alert</text>
+  <!-- Kafka Producer -->
+  <rect x="660" y="100" width="250" height="65" class="box"/>
+  <text x="785" y="132" text-anchor="middle" class="text">Kafka Producer</text>
+  <text x="785" y="153" text-anchor="middle" class="small">Publish heavy op</text>
 
-  <rect x="1010" y="250" width="300" height="78" class="box"/>
-  <text x="1160" y="285" text-anchor="middle" class="text">Kafka Consumer Group</text>
-  <text x="1160" y="313" text-anchor="middle" class="small">Worker pool goroutines</text>
+  <!-- Topic: dynamodb-sage-heavy-ops -->
+  <rect x="970" y="100" width="370" height="65" class="topic"/>
+  <text x="1155" y="132" text-anchor="middle" class="text">Topic 1</text>
+  <text x="1155" y="153" text-anchor="middle" class="small">dynamodb-sage-heavy-ops</text>
 
-  <rect x="1010" y="390" width="300" height="78" class="box"/>
-  <text x="1160" y="425" text-anchor="middle" class="text">Amazon DynamoDB</text>
-  <text x="1160" y="453" text-anchor="middle" class="small">Direct write</text>
+  <!-- Arrow: Server → Guardrail -->
+  <path class="arrow" d="M290 132 L350 132"/>
+  <!-- Arrow: Guardrail → Producer -->
+  <path class="arrow" d="M600 132 L660 132"/>
+  <!-- Arrow: Producer → heavy-ops -->
+  <path class="arrow" d="M910 132 L970 132"/>
 
-  <rect x="1010" y="530" width="300" height="78" class="box"/>
-  <text x="1160" y="565" text-anchor="middle" class="text">Post-write Success</text>
-  <text x="1160" y="593" text-anchor="middle" class="small">CDC / mutation event</text>
+  <!-- Guardrail fail path -->
+  <path class="arrow" d="M475 165 L475 210" style="marker-end: url(#arrow-fail); stroke: #e11d48;"/>
+  <text x="490" y="195" class="label" fill="#e11d48">Fail</text>
+  <text x="490" y="212" class="label" fill="#e11d48">(retry with</text>
+  <text x="490" y="228" class="label" fill="#e11d48">confirmation)</text>
 
-  <rect x="760" y="640" width="300" height="70" class="topic"/>
-  <text x="910" y="672" text-anchor="middle" class="text">Topic 2</text>
-  <text x="910" y="698" text-anchor="middle" class="small">dynamo-sage-mutations</text>
+  <!-- Forward arrow: Guardrail OK + Producer both feed into storage -->
+  <path class="arrow" d="M420 165 L420 195 L175 195 L175 230" stroke-dasharray="6 4" stroke="#7c3aed" fill="none" marker-end="url(#arrow)"/>
+  <text x="260" y="210" class="label" fill="#7c3aed">Store job</text>
 
-  <rect x="430" y="640" width="230" height="70" class="box"/>
-  <text x="545" y="672" text-anchor="middle" class="text">Analytics Sink</text>
-  <text x="545" y="698" text-anchor="middle" class="small">Usage / metrics</text>
+  <!-- ═══════════ STORAGE + CONSUMER ═══════════ -->
 
-  <rect x="1050" y="640" width="250" height="70" class="box"/>
-  <text x="1175" y="672" text-anchor="middle" class="text">Audit Log Sink</text>
-  <text x="1175" y="698" text-anchor="middle" class="small">Policy checks</text>
+  <!-- jobStorage -->
+  <rect x="60" y="235" width="230" height="65" class="storage"/>
+  <text x="175" y="267" text-anchor="middle" class="text">jobStorage</text>
+  <text x="175" y="288" text-anchor="middle" class="small">sync.Map</text>
 
-  <rect x="1050" y="520" width="250" height="70" class="alert"/>
-  <text x="1175" y="552" text-anchor="middle" class="text">srv.SendNotification()</text>
-  <text x="1175" y="578" text-anchor="middle" class="small">Raw PII or violation</text>
+  <!-- Return Job ID -->
+  <rect x="60" y="340" width="230" height="65" class="box"/>
+  <text x="175" y="372" text-anchor="middle" class="text">Return Job ID</text>
+  <text x="175" y="393" text-anchor="middle" class="small">Immediate response</text>
 
-  <rect x="1050" y="390" width="250" height="70" class="alert"/>
-  <text x="1175" y="422" text-anchor="middle" class="text">Live Alert</text>
-  <text x="1175" y="448" text-anchor="middle" class="small">Claude / Cursor</text>
+  <!-- Arrow: jobStorage → Return Job ID -->
+  <path class="arrow" d="M175 300 L175 340"/>
 
-  <path class="arrow" d="M260 125 L340 125"/>
-  <path class="arrow" d="M590 125 L670 125"/>
-  <path class="arrow" d="M920 125 L1010 125"/>
+  <!-- Consumer Group -->
+  <rect x="660" y="235" width="680" height="65" class="box"/>
+  <text x="1000" y="267" text-anchor="middle" class="text">Kafka Consumer Group</text>
+  <text x="1000" y="288" text-anchor="middle" class="small">Subscribes to all topics — handler dispatch by topic</text>
 
-  <text x="600" y="112" class="label">Passes</text>
-  <path class="arrow" d="M465 160 L465 250"/>
-  <text x="482" y="205" class="label">Fails</text>
+  <!-- Arrow: heavy-ops → Consumer Group -->
+  <path class="arrow" d="M1155 165 L1155 235"/>
 
-  <path class="arrow" d="M1160 160 L1160 250"/>
-  <path class="arrow" d="M1160 328 L1160 390"/>
-  <path class="arrow" d="M1160 468 L1160 530"/>
+  <!-- Arrow: Consumer → processHeavyOp -->
+  <path class="arrow" d="M850 300 L850 345"/>
+  <text x="865" y="330" class="label">reads key</text>
 
-  <path class="arrow" d="M1010 569 L910 640"/>
-  <path class="arrow" d="M1160 608 L1160 640"/>
-  <path class="arrow" d="M760 675 L660 675"/>
-  <path class="arrow" d="M1050 675 L1175 590"/>
-  <path class="arrow" d="M1175 520 L1175 460"/>
+  <!-- Arrow: Return ID from storage (dashed, user-facing) -->
+  <path class="arrow" d="M290 372 L660 372" stroke-dasharray="8 6" fill="none" marker-end="url(#arrow)"/>
+  <text x="475" y="358" class="label">Client: get_job_result(id)</text>
+  <text x="475" y="375" class="small">waits on Done channel</text>
 
-  <text x="875" y="620" class="label">Audit detects raw PII</text>
-  <text x="1035" y="505" class="label">Notification path</text>
+  <!-- ═══════════ ASYNC EXECUTION ═══════════ -->
+
+  <!-- processHeavyOp -->
+  <rect x="660" y="350" width="390" height="65" class="box"/>
+  <text x="855" y="382" text-anchor="middle" class="text">processHeavyOp()</text>
+  <text x="855" y="403" text-anchor="middle" class="small">Load job from storage, dispatch to executeJobOp</text>
+
+  <!-- executeJobOp -->
+  <rect x="660" y="460" width="390" height="65" class="box"/>
+  <text x="855" y="492" text-anchor="middle" class="text">executeJobOp()</text>
+  <text x="855" y="513" text-anchor="middle" class="small">batchPutItems / createOptimizedTable</text>
+
+  <!-- Arrow: processHeavyOp → executeJobOp -->
+  <path class="arrow" d="M855 415 L855 460"/>
+
+  <!-- DynamoDB icon (simplified) -->
+  <rect x="1120" y="460" width="220" height="65" class="box"/>
+  <text x="1230" y="492" text-anchor="middle" class="text">Amazon DynamoDB</text>
+  <text x="1230" y="513" text-anchor="middle" class="small">Direct write</text>
+
+  <!-- Arrow: executeJobOp → DynamoDB -->
+  <path class="arrow" d="M1050 492 L1120 492"/>
+  <text x="1085" y="482" class="label">writes</text>
+
+  <!-- close Done + SendNotification -->
+  <path class="arrow" d="M855 525 L855 565"/>
+  <text x="870" y="550" class="label">close(jr.Done)</text>
+
+  <!-- ═══════════ RESULT NOTIFICATION ═══════════ -->
+
+  <!-- SendNotification -->
+  <rect x="660" y="570" width="390" height="65" class="alert"/>
+  <text x="855" y="602" text-anchor="middle" class="text">SendNotification()</text>
+  <text x="855" y="623" text-anchor="middle" class="small">Publish success/error to notifications topic</text>
+
+  <!-- Arrow: SendNotification → notifications topic -->
+  <path class="arrow" d="M855 635 L855 665"/>
+
+  <!-- Topic: dynamodb-sage-notifications -->
+  <rect x="660" y="670" width="390" height="65" class="topic"/>
+  <text x="855" y="702" text-anchor="middle" class="text">Topic 2</text>
+  <text x="855" y="723" text-anchor="middle" class="small">dynamodb-sage-notifications</text>
+
+  <!-- Arrow: notifications → processNotification -->
+  <path class="arrow" d="M855 735 L855 760"/>
+
+  <!-- processNotification -->
+  <rect x="660" y="765" width="390" height="65" class="box"/>
+  <text x="855" y="797" text-anchor="middle" class="text">processNotification()</text>
+  <text x="855" y="818" text-anchor="middle" class="small">Display macOS notification</text>
+
+  <!-- macOS Notification output -->
+  <rect x="1120" y="765" width="220" height="65" class="alert"/>
+  <text x="1230" y="797" text-anchor="middle" class="text">macOS Notification</text>
+  <text x="1230" y="818" text-anchor="middle" class="small">SendUINotify()</text>
+
+  <!-- Arrow: processNotification → macOS -->
+  <path class="arrow" d="M1050 797 L1120 797"/>
 </svg>

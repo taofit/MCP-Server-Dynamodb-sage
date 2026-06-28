@@ -11,7 +11,8 @@ RUN go mod download
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /build/dynamodb-sage .
+ARG APP_VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-X dynamodb-sage/server.Version=${APP_VERSION} -s -w" -o /build/dynamodb-sage .
 
 # =============================================================================
 # Stage 2: Minimal runtime image
