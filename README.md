@@ -1,16 +1,24 @@
-# dynamodb-sage
+# 🧙‍♂️ DynamoDB-Sage
 
-**Security-first MCP gateway for DynamoDB** — LLMs securely interact with DynamoDB
-through a two-layer protection system: a **risk analyzer** pre-assesses every operation,
-then **guardrails** enforce capacity limits, validate schemas, and protect sensitive tables.
-Every action is audited. Large operations (batch puts, batch deletes, table creation)
-are offloaded to **Apache Kafka** for async background processing.
+### *The Zero-Trust Streaming AI Security Gateway for Amazon DynamoDB*
 
-Key differentiators:
-- **Two-layer protection**: risk analyzer pre-checks every operation for cost, size, and destructive potential; guardrails enforce hard limits on throughput, batch sizes, and schema compliance
-- **Async heavy operations**: Kafka-backed job queue for large DynamoDB operations (batch writes, table creation)
-- **Audit trail**: every DynamoDB operation logged with principal, timestamp, and throughput
-- **No direct SQL/NoSQL injection**: structured tool calls only
+[![Platform: AWS Lightsail](https://img.shields.io/badge/Platform-AWS_Lightsail-orange.svg?style=flat-square)]()
+[![Streaming: Apache Kafka](https://img.shields.io/badge/Streaming-Apache_Kafka-black.svg?style=flat-square)]()
+[![Protocol: MCP](https://img.shields.io/badge/Protocol-MCP_SDK-blue.svg?style=flat-square)]()
+
+DynamoDB-Sage is an enterprise-grade, security-first Model Context Protocol (MCP) gateway that bridges LLM agents (like Claude and Cursor) securely with Amazon DynamoDB. 
+
+Autonomous AI agents are highly prone to hallucination anomalies—whether running unthrottled table scans that spike cloud bills, or performing accidental, destructive bulk mutations. DynamoDB-Sage acts as an intelligent firewall and decoupled background execution engine, ensuring that AI-driven database interactions are deterministic, cost-bounded, compliant, and real-time.
+
+---
+
+### 🚀 Key Differentiators
+
+* **Two-Layer Runtime Protection:** Every single AI request passes through an automated **Risk Analyzer** to evaluate destructive blast-radius and compute costs *before* execution. A rigorous **Guardrail Engine** then acts as an inline proxy to enforce schema compliance, block PII leaks, and bound throughput constraints.
+* **Dual-Pipeline Task Offloading:** Lightweight reads and writes are served synchronously for an instantaneous user experience. Multi-second, high-impact heavy operations (like massive `BatchWrites`, structural table creation, or full scans) are safely offloaded out-of-process into **Apache Kafka** worker queues.
+* **Event-Driven Proactive Alerts:** Powered by a Kafka-to-MCP streaming subsystem, the server doesn't just wait to be asked questions. It actively watches database changes and streams **real-time push notifications** (`notifications/message`) directly to the client's UI console the moment compliance risks or jobs wrap up.
+* **Immutable Zero-Trust Audit Trail:** Native, low-latency tracking logs that track the execution principal, time signatures, partition footprints, and real-time AWS throughput costs securely.
+* **No Injection Exploits:** Complete protection against prompt-based injection attacks by exclusively enforcing structured, type-safe JSON tool calls instead of open-ended string processing.
 
 [![DynamoDB Sage Architecture](assets/hero.svg)](https://www.youtube.com/watch?v=f4i8fxrdEBw)
 
@@ -22,7 +30,9 @@ Key differentiators:
 *Full description in [project-flow.md](project-flow.md)*
 </details>
 
-## Prerequisites
+---
+
+## 🛠️ Prerequisites
 
 - [Docker](https://www.docker.com/)
 - [Go 1.25+](https://golang.org/) (for local binary development)
@@ -31,7 +41,7 @@ Key differentiators:
 
 ---
 
-## Local Development
+## 💻 Local Development
 
 The project uses **Docker Compose** to run all services locally:
 
@@ -108,7 +118,7 @@ npx @modelcontextprotocol/inspector --transport http http://localhost:8081
 
 ---
 
-## AWS Deployment (Lightsail — Active, $5/mo)
+## 🌐 AWS Deployment (Lightsail — Active, $5/mo)
 
 A single Lightsail instance runs the full stack (app + Kafka + Zookeeper) in Docker via Compose.
 nginx + Let's Encrypt provide HTTPS with your own domain.
@@ -168,7 +178,7 @@ No tags → falls back to commit hash → `"dev"`. Set `VERSION=...` env var to 
 
 The script skips nginx/certbot setup on subsequent runs.
 
-### Architecture
+### Production Architecture Details
 
 | Component | Detail |
 |-----------|--------|
@@ -198,7 +208,7 @@ terraform apply
 
 ---
 
-## Connecting MCP Clients
+## 🔌 Connecting MCP Clients
 
 > **Public demo server** available at `https://dynamodb-sage.hzcentre.com` — try it directly with any MCP client by replacing the URL with yours in the JSON config.
 
@@ -253,7 +263,7 @@ terraform apply
 
 ---
 
-## Development Workflow
+## 📈 Development Workflow
 
 This project follows **GitHub Flow**:
 
@@ -265,7 +275,7 @@ This project follows **GitHub Flow**:
 
 ---
 
-## Related Documents
+## 📂 Related Documents
 
 - [Project flow diagram](project-flow.md) — detailed architecture walkthrough
 - [Kafka flow diagram](assets/kafka-flow.svg) — async job processing with Kafka
