@@ -6,6 +6,7 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"                      # expose the HTTP API you use locally
+      - "2112:2112"                      # Prometheus metrics endpoint
     env_file: .env
     environment:
       - KAFKA_BROKERS=kafka:9092
@@ -19,6 +20,7 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - MCP_TRANSPORT_MODE=${MCP_TRANSPORT_MODE}
+      - METRICS_ADDR=${METRICS_ADDR:-:2112}
     volumes:
       - ./.env:/app/.env
       - ./data:/app/data
@@ -54,6 +56,7 @@ services:
       - ZOOKEEPER_TICK_TIME=2000
   kafka:
     image: confluentinc/cp-kafka:7.6.0
+    restart: always
     ports:
       - "9092:9092"
       - "9093:9093"

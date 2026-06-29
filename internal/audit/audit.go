@@ -2,6 +2,7 @@ package audit
 
 import (
 	"database/sql"
+	"dynamodb-sage/internal/metrics"
 	"log"
 	"time"
 
@@ -58,6 +59,7 @@ func (a *AuditLog) processQueue() {
 		for entry := range a.auditChan {
 			log.Printf("AUDIT: %+v", entry)
 			a.saveAuditHistory(entry)
+			metrics.AuditLogBufferDepth.Set(float64(len(a.auditChan)))
 		}
 	}()
 }
@@ -88,12 +90,14 @@ func (a *AuditLog) ReadAuditHistory(limit int32, startTime time.Time, endTime ti
 func (a *AuditLog) LogActivity(entry AuditEntry) {
 	select {
 	case a.auditChan <- entry:
+		metrics.AuditLogBufferDepth.Set(float64(len(a.auditChan)))
 	default:
 		log.Printf("audit channel is full, dropping entry: %v", entry)
 	}
 }
 
 func (a *AuditLog) saveAuditHistory(entry AuditEntry) {
+	start := time.Now()
 	_, err := a.db.Exec(`INSERT INTO audit_logs (timestamp, operation, table_name, user, capacity_units_consumed, capacity_type, status, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.Timestamp.Unix(),
 		entry.Operation,
@@ -103,6 +107,8 @@ func (a *AuditLog) saveAuditHistory(entry AuditEntry) {
 		entry.CapacityType,
 		entry.Status,
 		entry.Message)
+
+	metrics.AuditLogWriteDurationSeconds.WithLabelValues().Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		log.Printf("failed to save audit entry: %v", err)

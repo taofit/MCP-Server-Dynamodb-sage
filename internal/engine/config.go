@@ -1,3 +1,4 @@
+// Package engine provides configuration structures and functions for the DynamoDB Sage engine.
 package engine
 
 import (
@@ -20,23 +21,23 @@ type GlobalLimits struct {
 }
 
 type RiskThresholds struct {
-	TableSizeMB                float64 `yaml:"table_size_mb"`
-	ScanCostUSD                float64 `yaml:"scan_cost_usd"`
-	BatchDeleteCount           int32   `yaml:"batch_delete_count"`
-	BatchGetCount              int32   `yaml:"batch_get_count"`
-	BatchPutCount              int32   `yaml:"batch_put_count"`
-	MaxThroughputIncrease      int32   `yaml:"max_throughput_increase"`
-	UpdateExpressionDepth      int32   `yaml:"update_expression_depth"`
+	TableSizeMB           float64 `yaml:"table_size_mb"`
+	ScanCostUSD           float64 `yaml:"scan_cost_usd"`
+	BatchDeleteCount      int32   `yaml:"batch_delete_count"`
+	BatchGetCount         int32   `yaml:"batch_get_count"`
+	BatchPutCount         int32   `yaml:"batch_put_count"`
+	MaxThroughputIncrease int32   `yaml:"max_throughput_increase"`
+	UpdateExpressionDepth int32   `yaml:"update_expression_depth"`
 }
 
 type AppConfig struct {
-	GlobalLimits    GlobalLimits           `yaml:"global_limits"`
-	SensitiveFields []string               `yaml:"sensitive_fields"`
-	ProtectedTables []string               `yaml:"protected_tables"`
-	Tables          []TableConfig          `yaml:"tables"`
-	RiskThresholds  RiskThresholds         `yaml:"risk_thresholds"`
-	RiskLevel       RiskLevel              `yaml:"risk_level"`
-	ProtectedTags   map[string][]string    `yaml:"protected_tags"`
+	GlobalLimits    GlobalLimits        `yaml:"global_limits"`
+	SensitiveFields []string            `yaml:"sensitive_fields"`
+	ProtectedTables []string            `yaml:"protected_tables"`
+	Tables          []TableConfig       `yaml:"tables"`
+	RiskThresholds  RiskThresholds      `yaml:"risk_thresholds"`
+	RiskLevel       RiskLevel           `yaml:"risk_level"`
+	ProtectedTags   map[string][]string `yaml:"protected_tags"`
 }
 
 type RiskLevel int
@@ -49,12 +50,12 @@ const (
 )
 
 const (
-	DefaultMaxLimit            int32 = 100
-	DefaultLimit               int32 = 20
-	DefaultMaxThroughputIncrease int32 = 2000
-	DefaultUpdateExpressionDepth int32 = 5
-	DefaultScanCostUSD         float64 = 0.05
-	DefaultTableSizeMB         float64 = 10 // 10MB
+	DefaultMaxLimit              int32   = 100
+	DefaultLimit                 int32   = 20
+	DefaultMaxThroughputIncrease int32   = 2000
+	DefaultUpdateExpressionDepth int32   = 5
+	DefaultScanCostUSD           float64 = 0.05
+	DefaultTableSizeMB           float64 = 10 // 10MB
 )
 
 var DefaultProtectedTags = map[string][]string{

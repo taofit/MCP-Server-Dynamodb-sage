@@ -3,10 +3,12 @@ package server
 import (
 	"bytes"
 	"context"
+	"dynamodb-sage/internal/metrics"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/google/uuid"
@@ -14,10 +16,11 @@ import (
 )
 
 type JobResult struct {
-	ID     string              `json:"id"`
-	Result *mcp.CallToolResult `json:"result,omitempty"`
-	Done   chan struct{}       `json:"done,omitempty"`
-	Error  error               `json:"error,omitempty"`
+	ID        string              `json:"id"`
+	Result    *mcp.CallToolResult `json:"result,omitempty"`
+	Done      chan struct{}       `json:"done,omitempty"`
+	Error     error               `json:"error,omitempty"`
+	StartedAt time.Time           `json:"startedAt,omitempty"`
 }
 
 func (srv *Server) addTools() {
@@ -27,7 +30,7 @@ func (srv *Server) addTools() {
 		InputSchema: map[string]any{
 			"type": "object",
 		},
-	}, srv.listTables)
+	}, instrumentMCP(srv, "list_tables", srv.listTables))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "describe_table",
@@ -42,7 +45,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName"},
 		},
-	}, srv.describeTable)
+	}, instrumentMCP(srv, "describe_table", srv.describeTable))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "scan_table",
@@ -96,7 +99,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName"},
 		},
-	}, withRiskAnalysis(srv, srv.scanTable))
+	}, instrumentMCP(srv, "scan_table", withRiskAnalysis(srv, srv.scanTable)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "put_item",
@@ -120,7 +123,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "item"},
 		},
-	}, withRiskAnalysis(srv, srv.putItem))
+	}, instrumentMCP(srv, "put_item", withRiskAnalysis(srv, srv.putItem)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name: "query_table",
@@ -182,7 +185,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "keyConditionExpression", "expressionAttributeValues"},
 		},
-	}, srv.queryTable)
+	}, instrumentMCP(srv, "query_table", srv.queryTable))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "batch_put_items",
@@ -209,7 +212,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "items"},
 		},
-	}, withRiskAnalysis(srv, srv.batchPutItems))
+	}, instrumentMCP(srv, "batch_put_items", withRiskAnalysis(srv, srv.batchPutItems)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "batch_delete_items",
@@ -236,7 +239,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "keys"},
 		},
-	}, withRiskAnalysis(srv, srv.batchDeleteItems))
+	}, instrumentMCP(srv, "batch_delete_items", withRiskAnalysis(srv, srv.batchDeleteItems)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "delete_item",
@@ -260,7 +263,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "key"},
 		},
-	}, withRiskAnalysis(srv, srv.deleteItem))
+	}, instrumentMCP(srv, "delete_item", withRiskAnalysis(srv, srv.deleteItem)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "get_item",
@@ -279,7 +282,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "key"},
 		},
-	}, srv.getItem)
+	}, instrumentMCP(srv, "get_item", srv.getItem))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "update_item",
@@ -330,7 +333,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "key", "updateExpression"},
 		},
-	}, withRiskAnalysis(srv, srv.updateItem))
+	}, instrumentMCP(srv, "update_item", withRiskAnalysis(srv, srv.updateItem)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "batch_get_items",
@@ -357,7 +360,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "keys"},
 		},
-	}, withRiskAnalysis(srv, srv.batchGetItems))
+	}, instrumentMCP(srv, "batch_get_items", withRiskAnalysis(srv, srv.batchGetItems)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "read_audit_logs",
@@ -381,7 +384,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"limit"},
 		},
-	}, srv.readAuditLogs)
+	}, instrumentMCP(srv, "read_audit_logs", srv.readAuditLogs))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "create_optimized_table",
@@ -536,12 +539,6 @@ func (srv *Server) addTools() {
 								"staging",
 							},
 						},
-						map[string]any{
-							"key": "department",
-							"value": []any{
-								"finance",
-							},
-						},
 					},
 					"required": []string{"key", "value"},
 				},
@@ -553,7 +550,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "keySchema"},
 		},
-	}, withRiskAnalysis(srv, srv.createOptimizedTable))
+	}, instrumentMCP(srv, "create_optimized_table", withRiskAnalysis(srv, srv.createOptimizedTable)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "delete_table",
@@ -573,7 +570,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName"},
 		},
-	}, withRiskAnalysis(srv, srv.deleteTable))
+	}, instrumentMCP(srv, "delete_table", withRiskAnalysis(srv, srv.deleteTable)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "update_table",
@@ -593,18 +590,18 @@ func (srv *Server) addTools() {
 				"provisionedThroughput": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"readCapacity": map[string]any{
+						"readCapacityUnits": map[string]any{
 							"type":        "integer",
 							"description": "The read capacity units for the table. Use 0 to let the server normalize it to 1.",
 							"minimum":     0,
 						},
-						"writeCapacity": map[string]any{
+						"writeCapacityUnits": map[string]any{
 							"type":        "integer",
 							"description": "The write capacity units for the table. Use 0 to let the server normalize it to 1.",
 							"minimum":     0,
 						},
 					},
-					"required": []string{"readCapacity", "writeCapacity"},
+					"required": []string{"readCapacityUnits", "writeCapacityUnits"},
 				},
 				"billingMode": map[string]any{
 					"type":        "string",
@@ -718,7 +715,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName"},
 		},
-	}, withRiskAnalysis(srv, srv.updateTable))
+	}, instrumentMCP(srv, "update_table", withRiskAnalysis(srv, srv.updateTable)))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "update_table_ttl",
@@ -741,7 +738,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"tableName", "enabled", "attributeName"},
 		},
-	}, srv.updateTableTTL)
+	}, instrumentMCP(srv, "update_table_ttl", srv.updateTableTTL))
 
 	mcp.AddTool(srv.s, &mcp.Tool{
 		Name:        "get_job_result",
@@ -756,7 +753,7 @@ func (srv *Server) addTools() {
 			},
 			"required": []string{"jobId"},
 		},
-	}, srv.getJobResult)
+	}, instrumentMCP(srv, "get_job_result", srv.getJobResult))
 }
 
 func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
@@ -785,8 +782,10 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 		}
 		if srv.isLargeOperation(req) {
 			id := uuid.New().String()
-			jobResult := &JobResult{ID: id, Done: make(chan struct{})}
+			start := time.Now()
+			jobResult := &JobResult{ID: id, Done: make(chan struct{}), StartedAt: start}
 			srv.jobStorage.Store(id, jobResult)
+			metrics.JobStoragePending.Inc()
 
 			jobPayload := struct {
 				Input     In     `json:"input"`
@@ -802,7 +801,7 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 			}
 
 			if srv.kafkaClient != nil {
-				log.Printf("kafka producer is not nil, enqueueing task: %s", id)
+				log.Printf("kafka producer exists, enqueueing task: %s", id)
 				if err := srv.kafkaClient.Send(srv.heavyOpsTopic, id, inputPayload); err != nil {
 					log.Printf("failed to send task to Kafka: %v", err)
 					var empty Out
@@ -831,8 +830,31 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 	}
 }
 
+func instrumentMCP[In, Out any](srv *Server, name string, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+	return func(ctx context.Context, req *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
+		metrics.MCPToolInvocationsTotal.WithLabelValues(name, srv.transport).Inc()
+		start := time.Now()
+		result, out, err := handler(ctx, req, input)
+		dur := time.Since(start).Seconds()
+		if srv.isLargeOperation(req) {
+			metrics.MCPToolDurationSeconds.WithLabelValues(name, "heavy").Observe(dur)
+		} else {
+			metrics.MCPToolDurationSeconds.WithLabelValues(name, "light").Observe(dur)
+		}
+		if err != nil || (result != nil && result.IsError) {
+			et := "execution"
+			if err != nil {
+				et = "go_error"
+			}
+			metrics.MCPToolErrorsTotal.WithLabelValues(name, et).Inc()
+		}
+		return result, out, err
+	}
+}
+
 func (srv *Server) checkRisk(ctx context.Context, req *mcp.CallToolRequest, m map[string]any) (string, error) {
 	if confirmed, _ := m["confirmation"].(bool); confirmed {
+		metrics.RiskAnalysisConfirmedTotal.WithLabelValues(req.Params.Name).Inc()
 		return "", nil
 	}
 
@@ -842,6 +864,7 @@ func (srv *Server) checkRisk(ctx context.Context, req *mcp.CallToolRequest, m ma
 	}
 
 	if assessment.IsRisk() {
+		metrics.RiskAnalysisBlockedTotal.WithLabelValues(req.Params.Name, assessment.TableName, srv.riskAnalyzer.String(assessment.Level)).Inc()
 		return assessment.Reason, nil
 	}
 

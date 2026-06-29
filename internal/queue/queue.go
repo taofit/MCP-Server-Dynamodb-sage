@@ -3,6 +3,7 @@ package queue
 
 import (
 	"context"
+	"dynamodb-sage/internal/metrics"
 	"sync"
 	"time"
 )
@@ -26,6 +27,7 @@ func New(workerCount, buffer int) *QueueManager {
 }
 
 func (m *QueueManager) Enqueue(job Job) error {
+	metrics.QueueDepth.Inc()
 	m.jobs <- job
 	return nil
 }
@@ -58,6 +60,7 @@ func (m *QueueManager) Start(ctx context.Context) {
 		go func() {
 			defer m.Done()
 			for job := range m.jobs {
+				metrics.QueueDepth.Dec()
 				job(runCtx)
 			}
 		}()
@@ -65,6 +68,7 @@ func (m *QueueManager) Start(ctx context.Context) {
 }
 
 func (m *QueueManager) Submit(job Job) {
+	metrics.QueueDepth.Inc()
 	m.jobs <- job
 }
 

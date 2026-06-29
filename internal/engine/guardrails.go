@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 
+	"dynamodb-sage/internal/metrics"
+
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
@@ -125,13 +127,18 @@ func (g *Guardrail) EnforceLimit(limit int32) (int32, string) {
 	return limit, warning
 }
 
-func (g *Guardrail) ScrubItems(tableName string, items []map[string]any) []map[string]any {
+func (g *Guardrail) ScrubItems(operation, tableName string, items []map[string]any) []map[string]any {
+	piid := false
 	for _, item := range items {
 		for field := range item {
 			if g.isSensitiveField(field) || g.isPIIField(tableName, field) {
 				item[field] = fmt.Sprintf("%s:[REDACTED]", field)
+				piid = true
 			}
 		}
+	}
+	if piid {
+		metrics.RiskPIIDetectedTotal.WithLabelValues(operation, tableName).Inc()
 	}
 
 	return items

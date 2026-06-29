@@ -36,7 +36,7 @@ Thumbs.db
 *.swo
 
 # Ignore the local audit database
-.data/
+data/
 *.db
 # Risk analyzer (committed once, ignore local changes)
 internal/risk/analyzer.go

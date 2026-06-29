@@ -1,8 +1,11 @@
 package notification
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"log"
 	"os/exec"
 	"runtime"
@@ -10,15 +13,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type KafkaClient interface {
 	Send(topic string, key string, value []byte) error
 }
 
+type SessionProvider interface {
+	GetMcpSessions() iter.Seq[*mcp.ServerSession]
+}
+
 type NotificationService struct {
 	kafkaClient       KafkaClient
 	notificationTopic string
+	sessProvider      SessionProvider
 }
 
 type JobPayload struct {
@@ -28,34 +37,44 @@ type JobPayload struct {
 type PayloadResult struct {
 	TableName string
 	Operation string
+	InputHash string `json:"inputHash"`
 }
 
 type NotificationPayload struct {
+	Title     string `json:"title"`
 	JobID     string `json:"jobId"`
 	Table     string `json:"table"`
 	Severity  string `json:"severity"`
+	Operation string `json:"operation"`
 	Message   string `json:"message"`
+	InputHash string `json:"inputHash"`
 	Timestamp int64  `json:"timestamp"`
 }
 
-func NewNotificationService(kafkaClient KafkaClient, notificationTopic string) *NotificationService {
+func NewNotificationService(kafkaClient KafkaClient, notificationTopic string, sp SessionProvider) *NotificationService {
 	return &NotificationService{
 		kafkaClient:       kafkaClient,
 		notificationTopic: notificationTopic,
+		sessProvider:      sp,
 	}
 }
 
-func (ntf *NotificationService) SendNotification(tableName, status, message string) {
+func (ntf *NotificationService) SendNotification(tableName, status, operation, inputHash, message string) {
 	if ntf.kafkaClient == nil {
+		log.Printf("SendNotification: kafkaClient is nil, dropping: table=%s status=%s msg=%q", tableName, status, message)
 		return
 	}
 
 	id := uuid.New().String()
+	title := fmt.Sprintf("%s on %s", operation, tableName)
 	notification := NotificationPayload{
+		Title:     title,
 		JobID:     id,
 		Table:     tableName,
 		Severity:  status,
+		Operation: operation,
 		Message:   message,
+		InputHash: inputHash,
 		Timestamp: time.Now().Unix(),
 	}
 	data, _ := json.Marshal(notification)
@@ -77,6 +96,24 @@ func (ntf *NotificationService) SendUINotify(severity, message string) {
 	}
 }
 
+func (ntf *NotificationService) SendMCPNotification(key string, notificationPayload NotificationPayload) error {
+	var firstErr error
+	logLvl := logLevel(notificationPayload.Severity)
+	if ntf.sessProvider == nil {
+		return nil
+	}
+	for session := range ntf.sessProvider.GetMcpSessions() {
+		if err := session.Log(context.Background(), &mcp.LoggingMessageParams{
+			Level:  logLvl,
+			Data:   notificationPayload,
+			Logger: "dynamo-sage-notifications",
+		}); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func (ntf *NotificationService) ParsePayload(payload []byte) (PayloadResult, error) {
 	jobPayload := JobPayload{}
 	if err := json.Unmarshal(payload, &jobPayload); err != nil {
@@ -91,7 +128,10 @@ func (ntf *NotificationService) ParsePayload(payload []byte) (PayloadResult, err
 		return PayloadResult{}, fmt.Errorf("failed to parse table name from job payload: %v", jobPayload.Input["tableName"])
 	}
 
-	return PayloadResult{TableName: tableName, Operation: jobPayload.Operation}, nil
+	inputJSON, _ := json.Marshal(jobPayload.Input)
+	inputHash := fmt.Sprintf("%x", sha256.Sum256(inputJSON))
+
+	return PayloadResult{TableName: tableName, Operation: jobPayload.Operation, InputHash: inputHash}, nil
 }
 
 func (ntf *NotificationService) ConstructMessage(payload PayloadResult) string {
@@ -100,4 +140,21 @@ func (ntf *NotificationService) ConstructMessage(payload PayloadResult) string {
 
 func escapeForAppleScript(s string) string {
 	return strings.ReplaceAll(s, `"`, `\"`)
+}
+
+func logLevel(severity string) mcp.LoggingLevel {
+	switch strings.ToLower(severity) {
+	case "error":
+		return mcp.LoggingLevel("error")
+	case "warning":
+		return mcp.LoggingLevel("warning")
+	case "info":
+		return mcp.LoggingLevel("info")
+	case "success":
+		return mcp.LoggingLevel("success")
+	case "debug":
+		return mcp.LoggingLevel("debug")
+	default:
+		return mcp.LoggingLevel("info")
+	}
 }
