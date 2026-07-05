@@ -67,6 +67,10 @@ AWS_REGION=eu-north-1
 MCP_TRANSPORT_MODE=http
 CONFIG_PATH=/app/config.yaml
 KAFKA_CONFIG_PATH=/app/config/kafka.yaml
+METRICS_ADDR=:2112
+DYNAMO_SAGE_DB=/app/data/audit.db
+DYNAMO_SAGE_ADDR=:8080
+KAFKA_BROKERS=kafka:9092
 ENVEOF"
 
 echo ""

@@ -99,6 +99,7 @@ func main() {
 	if transportMode == "" {
 		transportMode = "stdio"
 	}
+	srv.SetTransport(transportMode)
 
 	switch transportMode {
 	case "stdio":

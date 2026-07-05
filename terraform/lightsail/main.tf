@@ -112,6 +112,11 @@ resource "aws_lightsail_instance_public_ports" "app" {
     to_port   = 22
     protocol  = "tcp"
   }
+  port_info {
+    from_port = 2112
+    to_port   = 2112
+    protocol  = "tcp"
+  }
 }
 
 # ------------------------------------------------------------------------------

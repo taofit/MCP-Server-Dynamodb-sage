@@ -1,3 +1,4 @@
+// Package risk provides risk analysis capabilities for DynamoDB operations.
 package risk
 
 import (
@@ -8,8 +9,10 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"dynamodb-sage/internal/engine"
+	"dynamodb-sage/internal/metrics"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -42,15 +45,16 @@ func (a *DynamoAdapter) BatchGetItem(ctx context.Context, in *dynamodb.BatchGetI
 func (a *DynamoAdapter) DescribeTimeToLive(ctx context.Context, in *dynamodb.DescribeTimeToLiveInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTimeToLiveOutput, error) {
 	return a.Client.DescribeTimeToLive(ctx, in, optFns...)
 }
-
+//RiskAnalyzer implements the MCP risk-analysis tool
 type RiskAnalyzer struct {
-    config      *engine.AppConfig
-    db          DynamoDBClient
-    guardrail   *engine.Guardrail
-    scanHistory sync.Map
+	config      *engine.AppConfig
+	db          DynamoDBClient
+	guardrail   *engine.Guardrail
+	scanHistory sync.Map
 }
-
+//Assessment collects all risk parameters
 type Assessment struct {
+	TableName    string           `json:"table_name"`
 	Level        engine.RiskLevel `json:"risk_level"`
 	EstimatedRCU float64          `json:"estimated_rcu,omitempty"`
 	EstimatedWCU float64          `json:"estimated_wcu,omitempty"`
@@ -81,28 +85,44 @@ func NewRiskAnalyzer(config *engine.AppConfig, db DynamoDBClient, guardrail *eng
 }
 
 func (ra *RiskAnalyzer) Analyze(ctx context.Context, req *mcp.CallToolRequest) (Assessment, error) {
+	var assessment Assessment
+	var err error
+	start := time.Now()
+
 	switch req.Params.Name {
 	case "scan_table":
-		return ra.analyzeScan(ctx, req)
+		assessment, err = ra.analyzeScan(ctx, req)
 	case "batch_delete_items":
-		return ra.analyzeBatchDelete(ctx, req)
+		assessment, err = ra.analyzeBatchDelete(ctx, req)
 	case "batch_get_items":
-		return ra.analyzeBatchGet(ctx, req)
+		assessment, err = ra.analyzeBatchGet(ctx, req)
 	case "batch_put_items":
-		return ra.analyzeBatchPut(ctx, req)
+		assessment, err = ra.analyzeBatchPut(ctx, req)
 	case "delete_item", "delete_table":
-		return ra.analyzeDelete(ctx, req)
+		assessment, err = ra.analyzeDelete(ctx, req)
 	case "update_table":
-		return ra.analyzeUpdateTable(ctx, req)
+		assessment, err = ra.analyzeUpdateTable(ctx, req)
 	case "put_item":
-		return ra.analyzePutItem(ctx, req)
+		assessment, err = ra.analyzePutItem(ctx, req)
 	case "update_item":
-		return ra.analyzeUpdateItem(ctx, req)
+		assessment, err = ra.analyzeUpdateItem(ctx, req)
 	case "create_optimized_table":
-		return ra.analyzeCreateOptimizedTable(ctx, req)
+		assessment, err = ra.analyzeCreateOptimizedTable(ctx, req)
 	default:
-		return Assessment{Level: engine.LowRiskLevel}, nil
+		assessment, err = Assessment{Level: engine.LowRiskLevel}, nil
 	}
+	if err != nil {
+		return Assessment{}, err
+	}
+	instrumentRiskAnalysis(start, req, assessment, ra)
+
+	return assessment, nil
+}
+
+func instrumentRiskAnalysis(start time.Time, req *mcp.CallToolRequest, assessment Assessment, ra *RiskAnalyzer) {
+	elapsed := time.Since(start).Seconds()
+	metrics.RiskAnalysisTotal.WithLabelValues(req.Params.Name, assessment.TableName, ra.String(assessment.Level)).Inc()
+	metrics.RiskAnalysisDurationSeconds.WithLabelValues(req.Params.Name).Observe(elapsed)
 }
 
 func (ra *RiskAnalyzer) analyzeCreateOptimizedTable(ctx context.Context, req *mcp.CallToolRequest) (Assessment, error) {
@@ -122,7 +142,7 @@ func (ra *RiskAnalyzer) analyzeCreateOptimizedTable(ctx context.Context, req *mc
 	reason = append(reason, ra.validateGsis(args.Gsis)...)
 
 	level := ra.getRiskLevel(reason)
-	return Assessment{Level: level, Reason: strings.Join(reason, "; ")}, nil
+	return Assessment{TableName: args.TableName, Level: level, Reason: strings.Join(reason, "; ")}, nil
 }
 
 func (ra *RiskAnalyzer) analyzeUpdateItem(ctx context.Context, req *mcp.CallToolRequest) (Assessment, error) {
@@ -188,8 +208,9 @@ func (ra *RiskAnalyzer) analyzeUpdateItem(ctx context.Context, req *mcp.CallTool
 	level := ra.escalatedRiskLevel(reason)
 
 	return Assessment{
-		Level:  level,
-		Reason: strings.Join(reason, "; "),
+		TableName: args.TableName,
+		Level:     level,
+		Reason:    strings.Join(reason, "; "),
 	}, nil
 }
 
@@ -223,12 +244,12 @@ func (ra *RiskAnalyzer) analyzeScan(ctx context.Context, req *mcp.CallToolReques
 			reason = append(reason, fmt.Sprintf("Scan cost ($%.2f) exceeds threshold: %.2f", cost, ra.config.RiskThresholds.ScanCostUSD))
 		}
 		level := ra.getRiskLevel(reason)
-		return Assessment{Level: level, Reason: strings.Join(reason, "; "), EstimatedRCU: rcu, EstimatedUSD: cost}, nil
+		return Assessment{TableName: args.TableName, Level: level, Reason: strings.Join(reason, "; "), EstimatedRCU: rcu, EstimatedUSD: cost}, nil
 	}
 
 	// If DB not available, return low risk with no cost
 	level := ra.getRiskLevel(reason)
-	return Assessment{Level: level, Reason: strings.Join(reason, "; ")}, nil
+	return Assessment{TableName: args.TableName, Level: level, Reason: strings.Join(reason, "; ")}, nil
 }
 
 func (ra *RiskAnalyzer) analyzeBatchDelete(ctx context.Context, req *mcp.CallToolRequest) (Assessment, error) {
@@ -257,8 +278,9 @@ func (ra *RiskAnalyzer) analyzeBatchDelete(ctx context.Context, req *mcp.CallToo
 	reason = append(reason, reasonStr)
 
 	return Assessment{
-		Level:  ra.escalatedRiskLevel(reason),
-		Reason: strings.Join(reason, "; "),
+		TableName: args.TableName,
+		Level:     ra.escalatedRiskLevel(reason),
+		Reason:    strings.Join(reason, "; "),
 	}, nil
 }
 
@@ -307,7 +329,7 @@ func (ra *RiskAnalyzer) analyzeBatchGet(ctx context.Context, req *mcp.CallToolRe
 	}
 	level := ra.getRiskLevel(reason)
 
-	return Assessment{Level: level, Reason: strings.Join(reason, "; ")}, nil
+	return Assessment{TableName: args.TableName, Level: level, Reason: strings.Join(reason, "; ")}, nil
 }
 
 func (ra *RiskAnalyzer) analyzeBatchPut(ctx context.Context, req *mcp.CallToolRequest) (Assessment, error) {
@@ -394,8 +416,9 @@ func (ra *RiskAnalyzer) analyzeBatchPut(ctx context.Context, req *mcp.CallToolRe
 	}
 
 	return Assessment{
-		Level:  ra.escalatedRiskLevel(reason),
-		Reason: strings.Join(reason, "; "),
+		TableName: args.TableName,
+		Level:     ra.escalatedRiskLevel(reason),
+		Reason:    strings.Join(reason, "; "),
 	}, nil
 }
 
@@ -410,7 +433,7 @@ func (ra *RiskAnalyzer) analyzeDelete(ctx context.Context, req *mcp.CallToolRequ
 	var reason []string
 	reason = append(reason, ra.checkTableProtection(args.TableName)...)
 
-	return Assessment{Level: ra.escalatedRiskLevel(reason), Reason: strings.Join(reason, "; ")}, nil
+	return Assessment{TableName: args.TableName, Level: ra.escalatedRiskLevel(reason), Reason: strings.Join(reason, "; ")}, nil
 }
 
 func (ra *RiskAnalyzer) analyzeUpdateTable(ctx context.Context, req *mcp.CallToolRequest) (Assessment, error) {
@@ -452,8 +475,9 @@ func (ra *RiskAnalyzer) analyzeUpdateTable(ctx context.Context, req *mcp.CallToo
 	reason = append(reason, ra.checkTableProtection(args.TableName)...)
 
 	return Assessment{
-		Level:  ra.escalatedRiskLevel(reason),
-		Reason: strings.Join(reason, "; "),
+		TableName: args.TableName,
+		Level:     ra.escalatedRiskLevel(reason),
+		Reason:    strings.Join(reason, "; "),
 	}, nil
 }
 
@@ -510,8 +534,9 @@ func (ra *RiskAnalyzer) analyzePutItem(ctx context.Context, req *mcp.CallToolReq
 	}
 
 	return Assessment{
-		Level:  ra.escalatedRiskLevel(reason),
-		Reason: strings.Join(reason, "; "),
+		TableName: args.TableName,
+		Level:     ra.escalatedRiskLevel(reason),
+		Reason:    strings.Join(reason, "; "),
 	}, nil
 }
 
@@ -800,4 +825,19 @@ func (ra *RiskAnalyzer) escalatedRiskLevel(reason []string) engine.RiskLevel {
 		}
 	}
 	return level
+}
+
+func (ra *RiskAnalyzer) String(r engine.RiskLevel) string {
+	switch r {
+	case engine.LowRiskLevel:
+		return "LOW"
+	case engine.MediumRiskLevel:
+		return "MEDIUM"
+	case engine.HighRiskLevel:
+		return "HIGH"
+	case engine.CriticalRiskLevel:
+		return "CRITICAL"
+	default:
+		return "UNKNOWN"
+	}
 }

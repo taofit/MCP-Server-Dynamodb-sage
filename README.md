@@ -160,6 +160,19 @@ curl https://dynamodb-sage.yourdomain.com/health
 # → ok
 ```
 
+### Access the Dashboard
+
+Open `https://dynamodb-sage.yourdomain.com/` in a browser. The dashboard is served from the same Go binary — no separate deployment needed.
+
+| Page | Route |
+|------|-------|
+| Metrics overview | `/` |
+| Chat interface | `/chat` |
+| Notification history | `/notifications` |
+| Audit log viewer | `/audit` |
+
+The Prometheus metrics endpoint is not exposed publicly (port `:2112` is internal to the container). To scrape metrics, point your Prometheus server at `http://dynamodb-sage:2112/metrics` within the Docker network, or expose `METRICS_ADDR=:8081` to serve metrics on the same port under `/metrics`.
+
 ### Versioning
 
 The binary embeds a version from `git describe --tags --always`. Tag before deploying:

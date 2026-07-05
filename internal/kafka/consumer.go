@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
+
+	"dynamodb-sage/internal/metrics"
 
 	"github.com/IBM/sarama"
 )
@@ -68,6 +71,7 @@ func (c *saramaConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 				return nil
 			}
 			log.Printf("Message claimed: topic=%s key=%q", message.Topic, string(message.Key))
+			instrumentDuration(message, claim)
 			c.handlersMu.RLock()
 			handler, ok := c.handlers[message.Topic]
 			c.handlersMu.RUnlock()
@@ -80,6 +84,27 @@ func (c *saramaConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 		case <-session.Context().Done():
 			return session.Context().Err()
 		}
+	}
+}
+
+func instrumentDuration(message *sarama.ConsumerMessage, claim sarama.ConsumerGroupClaim) {
+	var sendStart time.Time
+	for _, h := range message.Headers {
+		if string(h.Key) == headerSendStart {
+			if ns, err := strconv.ParseInt(string(h.Value), 10, 64); err == nil {
+				sendStart = time.Unix(0, ns)
+			}
+		}
+	}
+	if !sendStart.IsZero() {
+		lag := claim.HighWaterMarkOffset() - message.Offset - 1
+		if lag < 0 {
+			lag = 0
+		}
+		partition := claim.Partition()
+		dur := time.Since(sendStart).Seconds()
+		metrics.KafkaSendDurationSeconds.WithLabelValues(message.Topic).Observe(dur)
+		metrics.KafkaConsumerLag.WithLabelValues(message.Topic, strconv.Itoa(int(partition))).Set(float64(lag))
 	}
 }
 

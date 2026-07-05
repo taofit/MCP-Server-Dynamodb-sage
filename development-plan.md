@@ -1,26 +1,6 @@
-Here are some name suggestions that better capture the project's purpose:
+# DynamoDB-Sage Development Plan
 
-**Safety-focused names:**
-- `dynamo-guardian` — emphasizes protection and oversight
-- `dynamo-sentinel` — implies monitoring and alerting
-- `dynamo-shield` — conveys protection from harmful ops
-- `dynamo-sage` — wise advisor that warns before acting
-- `dynamo-gate` — a gate that controls what passes through
-
-**AI/MCP-focused names:**
-- `dynamo-copilot` — AI assistant that guides DynamoDB ops
-- `dynamo-pilot` — you're in control, it navigates safely
-- `dynamo-counsel` — gives advice before executing
-
-My top pick: `dynamo-sage` — it's short, memorable, and captures both the AI advisory role and the safety-first philosophy.
-
----
-
-## How to approach this project
-
-The core idea is an MCP server that wraps DynamoDB operations with a cost/risk analysis layer before execution.
-
-**Architecture:**
+## Architecture
 
 ```
 MCP Client (Claude/Cursor/etc)
@@ -32,7 +12,7 @@ MCP Client (Claude/Cursor/etc)
   AWS DynamoDB
 ```
 
-**Key components to build:**
+## Key components**
 
 1. MCP Server layer — expose DynamoDB operations as MCP tools (query, put, delete, scan, etc.)
 
@@ -113,16 +93,12 @@ MCP Client (Claude/Cursor/etc)
    - **AI agent reaction** — surfacing security alerts to the LLM agent's context window so it can autonomously propose remediation (e.g., `delete_item` to wipe exposed records).
    - **Multi-channel notifications** — extend `SendNotification` beyond macOS to Slack, email, or webhook sinks (configurable per severity).
 
-8. Multi-tenant isolation — per-team API keys, separate audit logs, table namespacing:
-   - `internal/auth/apikeys.go` — API key generation and validation
-   - `internal/auth/tenant.go` — tenant context extraction from request
-   - `config/provisioning.go` — per-tenant guardrails and table prefix
-
-8. Admin dashboard — simple web UI for configuration:
-   - View audit logs with filters
-   - Manage API keys per tenant
-   - Configure guardrails (throttles, budgets, allowlists)
-   - Usage stats (calls, capacity, costs per tenant)
+8. Web Dashboard — full MCP client + admin UI in the browser:
+   - Served directly from the Go binary at `/` (no separate deployment)
+   - **Chat interface** — user types natural language commands, UI calls MCP tools via `POST /`, displays results like Claude
+   - **SSE notification viewer** — connects to `/sse`, sends `logging/setLevel`, shows real-time operation alerts
+   - **Metrics dashboard** — fetches Prometheus metrics from `:2112/metrics`, renders charts (RCU/WCU usage, risk blocks, latency histograms)
+   - **Admin features** — view audit logs with filters, manage API keys, usage stats
 
 9. Docker Compose one-liner — `docker compose up` for self-hosting:
    - `docker-compose.yml` with server + optional dashboard
@@ -151,106 +127,18 @@ MCP Client (Claude/Cursor/etc)
     - Exposed as an MCP tool `suggest_table_schema` (describe-table → analysis → recommendations)
     - Fits the "sage/advisor" theme — not just preventing bad ops, but proactively giving design advice
 
-**Tech stack recommendation (Go, since your workspace is Go):**
+---
 
-- [`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk) — MCP server SDK for Go
-- `aws-sdk-go-v2` — DynamoDB client
-- `github.com/IBM/sarama` — Kafka producer/client for async job events, audit analytics, and proactive notifications
-- Config file (YAML) to define protected tables, cost thresholds, and environment labels
+## 14. MCP Server-to-Client Notifications — Real-Time Push to MCP Clients
 
-**Project structure:**
-
-```
-dynamo-sage/
-├── main.go
-│
-├── server/                        # MCP server layer
-│   ├── server.go                  # server construction, HTTP/stdin handlers, shutdown
-│   ├── handlers.go                # DynamoDB MCP tool handlers
-│   ├── tools.go                   # MCP tool registration and schemas
-│   └── types.go                   # MCP tool input argument structs
-│
-├── config.yaml                    # runtime guardrails and table policy configuration
-│
-├── internal/
-│   ├── engine/                    # config loading and guardrails
-│   │   ├── config.go              # load YAML config
-│   │   └── guardrails.go          # protected tables, schema validation, limits
-│   │
-│   ├── risk/                      # risk analyzer and schema advisor
-│   │   ├── analyzer.go            # main risk analysis logic
-│   │   ├── advisor.go             # schema/risk recommendations
-│   │   ├── mock.go                # test doubles for DynamoDB risk checks
-│   │   └── analyzer_test.go       # risk analyzer unit tests
-│   │
-│   ├── audit/                     # SQLite audit log
-│   │   └── audit.go               # audit entry model, SQLite setup, queries
-│   │
-│   ├── queue/                     # in-process worker pool for current async batch jobs
-│   │   └── queue.go               # worker pool, job channel, retry handling
-│   │
-│   ├── kafka/                     # durable async job/event backbone
-│   │   └── producer.go            # Sarama producer for heavy-op events
-│   │
-│   ├── dynamo/                    # planned DynamoDB client wrapper
-│   ├── cost/                      # planned RCU/WCU cost estimation
-│   ├── auth/                      # planned multi-tenant API keys and tenant context
-│   ├── dashboard/                 # planned admin dashboard
-│   └── rest/                      # planned REST API wrapper for non-MCP clients
-│
-├── docker-compose.yml             # local self-hosting
-├── scripts/
-│   ├── deploy.sh                  # Lightsail deploy helper
-│   └── setup-lightsail.sh         # Lightsail instance setup
-├── terraform/
-│   └── lightsail/                 # Lightsail infrastructure reference
-├── testing/
-│   ├── integration_test.go        # real AWS integration tests
-│   └── mocks.go                   # unit test mocks
-│
-└── README.md                      # project overview, setup, deployment, MCP client examples
-```
-
-**The key insight for the risk flow:**
-
-Every MCP tool handler should follow this pattern:
-1. Parse the incoming operation
-2. Run risk analysis (async describe-table if needed)
-3. If risk score exceeds threshold → return a warning response with estimated cost/impact, ask for explicit confirmation
-4. If confirmed (or low risk) → execute and return result
-
-Want me to scaffold the initial project structure with the MCP server setup and risk analyzer skeleton?
+MCP notifications dispatch via `session.Log()` to all connected sessions. Web dashboard clients receive SSE events at `/api/events` and toast popups.
 
 ---
 
-do you think this project will impress the potential employer
+## 15. Dashboard Persistence & UX Improvements
 
----
-
-
-Honestly, it depends on the employer, but here's a realistic assessment:
-
-**What makes it stand out:**
-- MCP is very new (2024) — most candidates won't have hands-on experience with it
-- The safety/cost-awareness angle shows product thinking, not just coding ability
-- DynamoDB expertise is genuinely valued at AWS-heavy companies
-- Go + AWS SDK v2 is a solid, in-demand stack
-
-**What could make it forgettable:**
-- If it's just a thin wrapper around AWS SDK with some `if` checks, it won't impress senior engineers
-- Many "AI gateway" projects exist — the differentiation needs to be obvious in the README
-
-**What would make it truly impressive:**
-
-- Real cost modeling — not just "this is a scan", but "this scan will cost ~$0.23 based on table size 4.2GB at $0.25/RCU per million"
-- Smart production detection — use AWS resource tags, not just name patterns
-- Dry-run mode — show exactly what DynamoDB would do without executing
-- Audit log — every operation attempted, risk score, whether user confirmed
-- A short demo video or GIF in the README showing it warning before a dangerous op
-
-**Bottom line:**
-
-It's a good portfolio project if you execute it well and document it clearly. The concept alone won't impress anyone — the implementation depth and the README storytelling will. Employers want to see that you thought about real-world concerns (cost, safety, production risk), not just that you wired up an MCP server.
-
-Want to start building it? I'd suggest starting with the risk analyzer core logic first, since that's the most differentiated part.
+- SQLite-backed `Store` for notifications and chat history (`server/store.go`)
+- Toast popup notifications via SSE at `/api/events`
+- API endpoint `GET /api/notifications` for persisted notification history
+- Metrics dashboard rendering Prometheus data from `:2112/metrics`
 

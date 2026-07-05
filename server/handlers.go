@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"dynamodb-sage/internal/audit"
+	"dynamodb-sage/internal/metrics"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -49,7 +51,10 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 		qi.IndexName = &args.IndexName
 	}
 
-	output, err := srv.db.Query(ctx, qi)
+	output, err := instrumentDynamoDB("query_table", args.TableName, func() (*dynamodb.QueryOutput, error) {
+		return srv.db.Query(ctx, qi)
+	})
+	recordConsumedCapacity("query_table", args.TableName, "RCU", output.ConsumedCapacity)
 
 	if err != nil {
 		var cc *types.ConsumedCapacity
@@ -66,7 +71,7 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 		return srv.errorResult(fmt.Sprintf("Error when unmarshaling items: %v", err)), nil, nil
 	}
 	itemsText := fmt.Sprintf("DynamoDB Table: \"%s\"\nQueried %d items from table %s:", args.TableName, len(items), args.TableName)
-	scrubbedItems := srv.guardrail.ScrubItems(args.TableName, items)
+	scrubbedItems := srv.guardrail.ScrubItems("query_table", args.TableName, items)
 	for i, item := range scrubbedItems {
 		itemJSON, _ := json.Marshal(item)
 		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJSON))
@@ -117,11 +122,14 @@ func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *
 		return res, nil, nil
 	}
 
-	output, err := srv.db.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName:              &args.TableName,
-		Item:                   av,
-		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
+	output, err := instrumentDynamoDB("put_item", args.TableName, func() (*dynamodb.PutItemOutput, error) {
+		return srv.db.PutItem(ctx, &dynamodb.PutItemInput{
+			TableName:              &args.TableName,
+			Item:                   av,
+			ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
+		})
 	})
+	recordConsumedCapacity("put_item", args.TableName, "WCU", output.ConsumedCapacity)
 	if err != nil {
 		var cc *types.ConsumedCapacity
 		if output != nil {
@@ -133,6 +141,7 @@ func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *
 	}
 	srv.sendAuditLog("put_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
+	srv.sendMutationNotification(args.TableName, "put_item", "success", "Item put successfully")
 	return srv.successResult(fmt.Sprintf("Successfully put item into table %s", args.TableName)), nil, nil
 }
 
@@ -158,8 +167,10 @@ func (srv *Server) listTables(ctx context.Context, req *mcp.CallToolRequest, arg
 }
 
 func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, args *DescribeTableArgs) (*mcp.CallToolResult, any, error) {
-	out, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-		TableName: &args.TableName,
+	out, err := instrumentDynamoDB("describe_table", args.TableName, func() (*dynamodb.DescribeTableOutput, error) {
+		return srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+			TableName: &args.TableName,
+		})
 	})
 	if err != nil {
 		srv.sendAuditLog("describe_table", args.TableName, "", nil, err)
@@ -264,7 +275,10 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 	if args.ConsistentRead != nil {
 		input.ConsistentRead = args.ConsistentRead
 	}
-	out, err := srv.db.Scan(ctx, input)
+	out, err := instrumentDynamoDB("scan_table", args.TableName, func() (*dynamodb.ScanOutput, error) {
+		return srv.db.Scan(ctx, input)
+	})
+	recordConsumedCapacity("scan_table", args.TableName, "RCU", out.ConsumedCapacity)
 
 	if err != nil {
 		var cc *types.ConsumedCapacity
@@ -284,7 +298,7 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 
 	// For a simple text representation of the items
 	itemsText := fmt.Sprintf("⚠️ Warning: Scan reads the entire table and is costly in RCU. Consider using query_table with a GSI for better performance and lower cost.\n\nDynamoDB Table: \"%s\"\nScanned %d items from table %s:", args.TableName, len(items), args.TableName)
-	scrubbedItems := srv.guardrail.ScrubItems(args.TableName, items)
+	scrubbedItems := srv.guardrail.ScrubItems("scan_table", args.TableName, items)
 	for i, item := range scrubbedItems {
 		itemJSON, _ := json.Marshal(item)
 		itemsText += fmt.Sprintf("\n[%d] %s", i+1, string(itemJSON))
@@ -362,8 +376,13 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 			ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
 		}
 		for i := 0; i < 3; i++ {
-			output, err := srv.db.BatchWriteItem(ctx, input)
+			output, err := instrumentDynamoDB("batch_write_item", args.TableName, func() (*dynamodb.BatchWriteItemOutput, error) {
+				return srv.db.BatchWriteItem(ctx, input)
+			})
 			if output != nil && output.ConsumedCapacity != nil {
+				for _, cc := range output.ConsumedCapacity {
+					recordConsumedCapacity("batch_write_item", args.TableName, "WCU", &cc)
+				}
 				ccList = append(ccList, output.ConsumedCapacity...)
 			}
 			if err != nil {
@@ -444,8 +463,13 @@ func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolReques
 			ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
 		}
 		for i := 0; i < 3; i++ {
-			output, err := srv.db.BatchWriteItem(ctx, input)
+			output, err := instrumentDynamoDB("batch_write_item", args.TableName, func() (*dynamodb.BatchWriteItemOutput, error) {
+				return srv.db.BatchWriteItem(ctx, input)
+			})
 			if output != nil && output.ConsumedCapacity != nil {
+				for _, cc := range output.ConsumedCapacity {
+					recordConsumedCapacity("batch_write_item", args.TableName, "WCU", &cc)
+				}
 				ccList = append(ccList, output.ConsumedCapacity...)
 			}
 			if err != nil {
@@ -502,7 +526,10 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
 	}
 
-	output, err := srv.db.DeleteItem(ctx, input)
+	output, err := instrumentDynamoDB("delete_item", args.TableName, func() (*dynamodb.DeleteItemOutput, error) {
+		return srv.db.DeleteItem(ctx, input)
+	})
+	recordConsumedCapacity("delete_item", args.TableName, "WCU", output.ConsumedCapacity)
 	if err != nil {
 		var consumedCapacity *types.ConsumedCapacity
 		if output != nil {
@@ -522,9 +549,10 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	attributes := map[string]any{}
 	attributevalue.UnmarshalMap(output.Attributes, &attributes)
 
-	scrubbed := srv.guardrail.ScrubItems(args.TableName, []map[string]any{attributes})
-	itemJSON, _ := json.Marshal(scrubbed[0])
+	scrubbedItems := srv.guardrail.ScrubItems("delete_item", args.TableName, []map[string]any{attributes})
+	itemJSON, _ := json.Marshal(scrubbedItems[0])
 	keyJSON, _ := json.Marshal(args.Key)
+	srv.sendMutationNotification(args.TableName, "delete_item", "success", fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJSON), args.TableName, string(itemJSON)))
 
 	return srv.successResult(fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJSON), args.TableName, string(itemJSON))), nil, nil
 }
@@ -544,7 +572,10 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
 	}
 
-	output, err := srv.db.GetItem(ctx, input)
+	output, err := instrumentDynamoDB("get_item", args.TableName, func() (*dynamodb.GetItemOutput, error) {
+		return srv.db.GetItem(ctx, input)
+	})
+	recordConsumedCapacity("get_item", args.TableName, "RCU", output.ConsumedCapacity)
 	if err != nil {
 		var consumedCapacity *types.ConsumedCapacity
 		if output != nil {
@@ -561,7 +592,8 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 		return srv.errorResult(fmt.Sprintf("Item with key %s not found in table %s", string(keyJSON), args.TableName)), nil, nil
 	}
 
-	scrubbedItem := srv.guardrail.ScrubItems(args.TableName, []map[string]any{item})[0]
+	scrubbedItems := srv.guardrail.ScrubItems("get_item", args.TableName, []map[string]any{item})
+	scrubbedItem := scrubbedItems[0]
 	itemJSON, _ := json.Marshal(scrubbedItem)
 
 	srv.sendAuditLog("get_item", args.TableName, "RCU", output.ConsumedCapacity, nil)
@@ -616,7 +648,10 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		input.ReturnValues = types.ReturnValue(args.ReturnValue)
 	}
 
-	output, err := srv.db.UpdateItem(ctx, input)
+	output, err := instrumentDynamoDB("update_item", args.TableName, func() (*dynamodb.UpdateItemOutput, error) {
+		return srv.db.UpdateItem(ctx, input)
+	})
+	recordConsumedCapacity("update_item", args.TableName, "WCU", output.ConsumedCapacity)
 	if err != nil {
 		var cc *types.ConsumedCapacity
 		if output != nil {
@@ -631,7 +666,8 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	var scrubbedItem map[string]any
 	if len(output.Attributes) != 0 {
 		attributevalue.UnmarshalMap(output.Attributes, &attributes)
-		scrubbedItem = srv.guardrail.ScrubItems(args.TableName, []map[string]any{attributes})[0]
+		scrubbedItems := srv.guardrail.ScrubItems("update_item", args.TableName, []map[string]any{attributes})
+		scrubbedItem = scrubbedItems[0]
 	}
 
 	keyJSON, _ := json.Marshal(args.Key)
@@ -640,6 +676,7 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		scrubbedAttributeJSON, _ := json.Marshal(scrubbedItem)
 		attributesMsg = fmt.Sprintf(", Attributes: %s", string(scrubbedAttributeJSON))
 	}
+	srv.sendMutationNotification(args.TableName, "update_item", "success", fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJSON), args.TableName, attributesMsg))
 
 	return srv.successResult(fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJSON), args.TableName, attributesMsg)), nil, nil
 }
@@ -689,8 +726,13 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 		}
 
 		for i := 0; i < 3; i++ {
-			output, err := srv.db.BatchGetItem(ctx, input)
+			output, err := instrumentDynamoDB("batch_get_item", args.TableName, func() (*dynamodb.BatchGetItemOutput, error) {
+				return srv.db.BatchGetItem(ctx, input)
+			})
 			if output != nil && output.ConsumedCapacity != nil {
+				for _, cc := range output.ConsumedCapacity {
+					recordConsumedCapacity("batch_get_item", args.TableName, "RCU", &cc)
+				}
 				ccList = append(ccList, output.ConsumedCapacity...)
 			}
 			if err != nil {
@@ -735,8 +777,7 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 		attributevalue.UnmarshalMap(item, &scrubbedItem)
 		scrubbedItems = append(scrubbedItems, scrubbedItem)
 	}
-
-	scrubbedItems = srv.guardrail.ScrubItems(args.TableName, scrubbedItems)
+	scrubbedItems = srv.guardrail.ScrubItems("batch_get_items", args.TableName, scrubbedItems)
 
 	itemStrings := []string{}
 	for _, item := range scrubbedItems {
@@ -809,15 +850,17 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 	for _, ad := range attributeDefinitionMap {
 		attributeDefinitionList = append(attributeDefinitionList, ad)
 	}
-	output, err := srv.db.CreateTable(ctx, &dynamodb.CreateTableInput{
-		TableName:              aws.String(args.TableName),
-		KeySchema:              keySchema,
-		AttributeDefinitions:   attributeDefinitionList,
-		BillingMode:            types.BillingMode(args.BillingMode),
-		GlobalSecondaryIndexes: gsis,
-		LocalSecondaryIndexes:  lsis,
-		ProvisionedThroughput:  srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
-		Tags:                   tags,
+	output, err := instrumentDynamoDB("create_table", args.TableName, func() (*dynamodb.CreateTableOutput, error) {
+		return srv.db.CreateTable(ctx, &dynamodb.CreateTableInput{
+			TableName:              aws.String(args.TableName),
+			KeySchema:              keySchema,
+			AttributeDefinitions:   attributeDefinitionList,
+			BillingMode:            types.BillingMode(args.BillingMode),
+			GlobalSecondaryIndexes: gsis,
+			LocalSecondaryIndexes:  lsis,
+			ProvisionedThroughput:  srv.getProvisionedThroughput(args.BillingMode, args.ReadCapacityUnits, args.WriteCapacityUnits),
+			Tags:                   tags,
+		})
 	})
 	if err != nil {
 		srv.sendAuditLog("create_optimized_table", args.TableName, "", nil, err)
@@ -894,10 +937,12 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 		input.AttributeDefinitions = attriList
 	}
 
-	output, err := srv.db.UpdateTable(ctx, input)
+	output, err := instrumentDynamoDB("update_table", args.TableName, func() (*dynamodb.UpdateTableOutput, error) {
+		return srv.db.UpdateTable(ctx, input)
+	})
 	if err != nil {
 		srv.sendAuditLog("update_table", args.TableName, "", nil, err)
-		return srv.errorResult(fmt.Sprintf("UpdateTable %s failed: %v", args.TableName, err)), nil, nil
+		return srv.errorResult(fmt.Sprintf("Failed to update table %s: %v", args.TableName, err)), nil, nil
 	}
 
 	tags := toDynamoTags(args.Tags)
@@ -914,8 +959,10 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 	srv.sendAuditLog("update_table", args.TableName, "", nil, nil)
 
 	if len(tags) > 0 {
+		srv.sendMutationNotification(args.TableName, "update_table", "success", fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v\n Tags applied: %s", args.TableName, output.TableDescription.TableStatus, tagSummary(tags)))
 		return srv.successResult(fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v\n Tags applied: %s", args.TableName, output.TableDescription.TableStatus, tagSummary(tags))), nil, nil
 	}
+	srv.sendMutationNotification(args.TableName, "update_table", "success", fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v", args.TableName, output.TableDescription.TableStatus))
 
 	return srv.successResult(fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v", args.TableName, output.TableDescription.TableStatus)), nil, nil
 }
@@ -938,9 +985,11 @@ func (srv *Server) tagTable(ctx context.Context, tableName, tableArn string, tag
 	if tableArn == "" {
 		return fmt.Errorf("table ARN is required to tag DynamoDB table")
 	}
-	_, err := srv.db.TagResource(ctx, &dynamodb.TagResourceInput{
-		ResourceArn: aws.String(tableArn),
-		Tags:        tags,
+	_, err := instrumentDynamoDB("tag_resource", tableName, func() (*dynamodb.TagResourceOutput, error) {
+		return srv.db.TagResource(ctx, &dynamodb.TagResourceInput{
+			ResourceArn: aws.String(tableArn),
+			Tags:        tags,
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("tag table %s: %w", tableName, err)
@@ -968,14 +1017,18 @@ func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, ar
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table cannot be deleted", err)), nil, nil
 	}
-	_, err := srv.db.DeleteTable(ctx, &dynamodb.DeleteTableInput{
-		TableName: aws.String(args.TableName),
+	_, err := instrumentDynamoDB("delete_table", args.TableName, func() (*dynamodb.DeleteTableOutput, error) {
+		return srv.db.DeleteTable(ctx, &dynamodb.DeleteTableInput{
+			TableName: aws.String(args.TableName),
+		})
 	})
 	if err != nil {
 		srv.sendAuditLog("delete_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("DeleteTable %s failed: %v", args.TableName, err)), nil, nil
 	}
 	srv.sendAuditLog("delete_table", args.TableName, "", nil, nil)
+	srv.sendMutationNotification(args.TableName, "delete_table", "success", fmt.Sprintf("Successfully deleted table %s", args.TableName))
+
 	return srv.successResult(fmt.Sprintf("Successfully deleted table %s", args.TableName)), nil, nil
 }
 
@@ -992,8 +1045,10 @@ func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest,
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table cannot be modified", err)), nil, nil
 	}
 
-	output, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-		TableName: aws.String(args.TableName),
+	output, err := instrumentDynamoDB("describe_table", args.TableName, func() (*dynamodb.DescribeTableOutput, error) {
+		return srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+			TableName: aws.String(args.TableName),
+		})
 	})
 	if err != nil {
 		return srv.errorResult(fmt.Sprintf("UpdateTableTTL %s failed: %v", args.TableName, err)), nil, nil
@@ -1017,25 +1072,32 @@ func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest,
 		},
 	}
 
-	_, err = srv.db.UpdateTimeToLive(ctx, input)
+	_, err = instrumentDynamoDB("update_time_to_live", args.TableName, func() (*dynamodb.UpdateTimeToLiveOutput, error) {
+		return srv.db.UpdateTimeToLive(ctx, input)
+	})
 	if err != nil {
 		srv.sendAuditLog("update_table_ttl", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("UpdateTableTTL %s failed: %v", args.TableName, err)), nil, nil
 	}
-	status := "Unknown"
-	ttlOutput, _ := srv.db.DescribeTimeToLive(ctx, &dynamodb.DescribeTimeToLiveInput{
-		TableName: aws.String(args.TableName),
+	ttlStatus := "Unknown"
+	ttlOutput, _ := instrumentDynamoDB("describe_time_to_live", args.TableName, func() (*dynamodb.DescribeTimeToLiveOutput, error) {
+		return srv.db.DescribeTimeToLive(ctx, &dynamodb.DescribeTimeToLiveInput{
+			TableName: aws.String(args.TableName),
+		})
 	})
 	if ttlOutput != nil && ttlOutput.TimeToLiveDescription != nil {
-		status = string(ttlOutput.TimeToLiveDescription.TimeToLiveStatus)
+		ttlStatus = string(ttlOutput.TimeToLiveDescription.TimeToLiveStatus)
 	}
 	srv.sendAuditLog("update_table_ttl", args.TableName, "", nil, nil)
-	return srv.successResult(fmt.Sprintf("Successfully updated table %s TTL status to %s", args.TableName, status)), nil, nil
+	return srv.successResult(fmt.Sprintf("Successfully updated table %s TTL status to %s", args.TableName, ttlStatus)), nil, nil
 }
 
 func (srv *Server) getJobResult(ctx context.Context, req *mcp.CallToolRequest, args *GetJobResultArgs) (*mcp.CallToolResult, any, error) {
 	jobResult, ok := srv.jobStorage.Load(args.JobID)
-	defer srv.jobStorage.Delete(args.JobID)
+	defer func() {
+		srv.jobStorage.Delete(args.JobID)
+		metrics.JobStoragePending.Dec()
+	}()
 	if !ok {
 		return srv.errorResult(fmt.Sprintf("Job %s not found", args.JobID)), nil, nil
 	}
@@ -1120,6 +1182,36 @@ func (srv *Server) sendAuditLog(operation string, tableName string, capacityType
 		consumedCapacityUnits = *consumedCapacity.CapacityUnits
 	}
 	srv.RecordActionLog(srv.auditLog, srv.generateAuditEntry(operation, tableName, consumedCapacityUnits, capacityType, status))
+}
+
+func status(err error) string {
+	if err != nil {
+		return "error"
+	}
+	return "success"
+}
+
+func instrumentDynamoDB[T any](operation, table string, fn func() (T, error)) (T, error) {
+	start := time.Now()
+	output, err := fn()
+	dur := time.Since(start).Seconds()
+	st := status(err)
+	metrics.DynamoDBOperationDurationSeconds.WithLabelValues(operation, table, st).Observe(dur)
+	metrics.DynamoDBOperationTotal.WithLabelValues(operation, table, st).Inc()
+	return output, err
+}
+
+func instrumentHeavyJob(operation string, startedAt time.Time, err error) {
+	dur := time.Since(startedAt).Seconds()
+	st := status(err)
+	metrics.AsyncJobDurationSeconds.WithLabelValues(operation, st).Observe(dur)
+	metrics.AsyncJobsTotal.WithLabelValues(operation, st).Inc()
+}
+
+func recordConsumedCapacity(operation, table, capacityType string, cc *types.ConsumedCapacity) {
+	if cc != nil && cc.CapacityUnits != nil {
+		metrics.DynamoDBConsumedCapacityTotal.WithLabelValues(operation, table, capacityType).Add(*cc.CapacityUnits)
+	}
 }
 
 func (srv *Server) aggregateConsumedCapacity(ccList []types.ConsumedCapacity) *types.ConsumedCapacity {
@@ -1259,14 +1351,18 @@ func (srv *Server) getAttributeDefinitions(adList []types.AttributeDefinition) [
 }
 
 func (srv *Server) validateProtectedTag(ctx context.Context, tableName string) error {
-	desc, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-		TableName: aws.String(tableName),
+	desc, err := instrumentDynamoDB("describe_table", tableName, func() (*dynamodb.DescribeTableOutput, error) {
+		return srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+			TableName: aws.String(tableName),
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("error when describing table: %v", err)
 	}
-	tags, err := srv.db.ListTagsOfResource(ctx, &dynamodb.ListTagsOfResourceInput{
-		ResourceArn: desc.Table.TableArn,
+	tags, err := instrumentDynamoDB("list_tags_of_resource", tableName, func() (*dynamodb.ListTagsOfResourceOutput, error) {
+		return srv.db.ListTagsOfResource(ctx, &dynamodb.ListTagsOfResourceInput{
+			ResourceArn: desc.Table.TableArn,
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("error when listing tags of resource: %v", err)
@@ -1285,4 +1381,103 @@ func (srv *Server) validateProtectedTag(ctx context.Context, tableName string) e
 	}
 
 	return nil
+}
+
+func (srv *Server) processHeavyOp(key string, payload []byte) error {
+	payloadResult, err := srv.notificationService.ParsePayload(payload)
+	if err != nil {
+		srv.notificationService.SendNotification("unknown", "error", "", "", err.Error())
+		return err
+	}
+	jobResult, ok := srv.jobStorage.Load(key)
+	if !ok {
+		log.Printf("job not found: %s", key)
+		return nil
+	}
+
+	jr := jobResult.(*JobResult)
+	srv.executeJobOp(jr, payload)
+
+	if jr.Error != nil {
+		srv.notificationService.SendNotification(payloadResult.TableName, "error", "", "", jr.Error.Error())
+		return jr.Error
+	}
+	srv.notificationService.SendNotification(payloadResult.TableName, "success", payloadResult.Operation, payloadResult.InputHash, srv.notificationService.ConstructMessage(payloadResult))
+
+	return nil
+}
+
+func (srv *Server) processHeavyOpForQueue(key string, payload []byte) error {
+	jobResult, ok := srv.jobStorage.Load(key)
+	if !ok {
+		return fmt.Errorf("job not found: %s", key)
+	}
+	jr := jobResult.(*JobResult)
+	srv.executeJobOp(jr, payload)
+	if jr.Error != nil {
+		return jr.Error
+	}
+	return nil
+}
+
+func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
+	jobPayload := struct {
+		Input     json.RawMessage `json:"input"`
+		Operation string          `json:"operation"`
+	}{}
+	jobPayload.Operation = "unknown"
+	defer func() {
+		if jr != nil && jr.Done != nil {
+			instrumentHeavyJob(jobPayload.Operation, jr.StartedAt, jr.Error)
+			close(jr.Done)
+		}
+	}()
+	if err := json.Unmarshal(payload, &jobPayload); err != nil {
+		jr.Error = fmt.Errorf("failed to unmarshal job payload: %v", err)
+		return
+	}
+
+	ctx := context.Background()
+	req := &mcp.CallToolRequest{}
+
+	switch jobPayload.Operation {
+	case "batch_put_items":
+		var input BatchPutItemsArgs
+		if err := json.Unmarshal(jobPayload.Input, &input); err != nil {
+			jr.Error = fmt.Errorf("failed to parse batch_put_items args: %v", err)
+		} else {
+			result, _, err := srv.batchPutItems(ctx, req, &input)
+			if err != nil {
+				jr.Error = fmt.Errorf("failed to execute batch_put_items: %v", err)
+			} else {
+				jr.Result = result
+			}
+		}
+	case "batch_delete_items":
+		var input BatchDeleteItemsArgs
+		if err := json.Unmarshal(jobPayload.Input, &input); err != nil {
+			jr.Error = fmt.Errorf("failed to parse batch_delete_items args: %v", err)
+		} else {
+			result, _, err := srv.batchDeleteItems(ctx, req, &input)
+			if err != nil {
+				jr.Error = fmt.Errorf("failed to execute batch_delete_items: %v", err)
+			} else {
+				jr.Result = result
+			}
+		}
+	case "create_optimized_table":
+		var input CreateOptimizedTableArgs
+		if err := json.Unmarshal(jobPayload.Input, &input); err != nil {
+			jr.Error = fmt.Errorf("failed to parse create_optimized_table args: %v", err)
+		} else {
+			result, _, err := srv.createOptimizedTable(ctx, req, &input)
+			if err != nil {
+				jr.Error = fmt.Errorf("failed to execute create_optimized_table: %v", err)
+			} else {
+				jr.Result = result
+			}
+		}
+	default:
+		jr.Error = fmt.Errorf("unknown operation: %s", jobPayload.Operation)
+	}
 }

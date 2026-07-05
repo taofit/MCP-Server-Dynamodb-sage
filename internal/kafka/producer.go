@@ -2,8 +2,14 @@
 package kafka
 
 import (
+	"dynamodb-sage/internal/metrics"
+	"strconv"
+	"time"
+
 	"github.com/IBM/sarama"
 )
+
+const headerSendStart = "x-send-start"
 
 type Producer interface {
 	Send(topic string, key string, payload []byte) error
@@ -39,9 +45,17 @@ func (p *saramaProducer) Send(topic string, key string, payload []byte) error {
 		Topic: topic,
 		Key:   sarama.StringEncoder(key),
 		Value: sarama.ByteEncoder(payload),
+		Headers: []sarama.RecordHeader{
+			{Key: []byte(headerSendStart), Value: []byte(strconv.FormatInt(time.Now().UnixNano(), 10))},
+		},
 	}
-
 	_, _, err := p.producer.SendMessage(msg)
+	if err != nil {
+		metrics.KafkaSendTotal.WithLabelValues(topic, "error").Inc()
+		return err
+	}
+	metrics.KafkaSendTotal.WithLabelValues(topic, "success").Inc()
+	metrics.KafkaSendBytesTotal.WithLabelValues(topic).Add(float64(len(payload)))
 	return err
 }
 
