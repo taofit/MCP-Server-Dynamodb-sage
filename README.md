@@ -85,7 +85,7 @@ curl http://localhost:8080/health               # Go app
 5. Stop all containers when done:
 
 ```bash
- docker compose --profile local down -v   # stop local stack and remove volumes
+docker compose --profile local down -v   # stop local stack and remove volumes
 ```
 
 ### Run Go binary locally (outside Docker)

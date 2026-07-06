@@ -698,7 +698,7 @@ func (srv *Server) addTools() {
 						"type": "object",
 						"properties": map[string]any{
 							"key": map[string]any{
-								"type":        "string",
+								"type":        "string", 
 								"description": "The key of the tag",
 							},
 							"value": map[string]any{
@@ -754,6 +754,26 @@ func (srv *Server) addTools() {
 			"required": []string{"jobId"},
 		},
 	}, instrumentMCP(srv, "get_job_result", srv.getJobResult))
+
+	srv.toolList = []ToolInfo{
+		{Name: "list_tables", Description: "List all DynamoDB tables"},
+		{Name: "describe_table", Description: "Get details about a DynamoDB table schema, indexes, and status"},
+		{Name: "scan_table", Description: "Expensive: scan entire table (use query_table when possible)"},
+		{Name: "put_item", Description: "Put an item into a DynamoDB table"},
+		{Name: "query_table", Description: "Query a table using key condition (preferred over scan)"},
+		{Name: "batch_put_items", Description: "Put multiple items into a DynamoDB table"},
+		{Name: "batch_delete_items", Description: "Delete multiple items in a DynamoDB table"},
+		{Name: "delete_item", Description: "Delete an item from a DynamoDB table"},
+		{Name: "get_item", Description: "Get an item from the table using primary key"},
+		{Name: "update_item", Description: "Update an item in the table using primary key"},
+		{Name: "batch_get_items", Description: "Batch get items from the table using primary keys"},
+		{Name: "read_audit_logs", Description: "Read the audit log showing recent DynamoDB operations"},
+		{Name: "create_optimized_table", Description: "Create an optimized DynamoDB table using best practices"},
+		{Name: "delete_table", Description: "Delete a table"},
+		{Name: "update_table", Description: "Update table throughput, billing mode, or GSIs"},
+		{Name: "update_table_ttl", Description: "Update a table's time to live"},
+		{Name: "get_job_result", Description: "Get the result of a job"},
+	}
 }
 
 func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {

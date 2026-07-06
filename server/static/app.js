@@ -1,4 +1,5 @@
 let nextId = 1;
+let allTools = [];
 
 // --- Tabs ---
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -84,7 +85,11 @@ async function loadTools() {
   try {
     const res = await fetch('/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'MCP-Protocol-Version': '2025-06-18'
+      },
       body: JSON.stringify({
         jsonrpc: '2.0',
         method: 'tools/list',
@@ -94,8 +99,9 @@ async function loadTools() {
     const body = await res.json();
     if (body.result && body.result.tools) {
       select.innerHTML = '<option value="">Select a tool...</option>';
-      body.result.tools.sort((a, b) => a.name.localeCompare(b.name));
-      body.result.tools.forEach(t => {
+      allTools = body.result.tools;
+      allTools.sort((a, b) => a.name.localeCompare(b.name));
+      allTools.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.name;
         opt.textContent = t.name;
@@ -109,6 +115,82 @@ async function loadTools() {
     select.innerHTML = '<option value="">Error loading tools: ' + err.message + '</option>';
   }
 }
+
+// Populate example JSON when a tool is selected
+document.getElementById('tool-select').addEventListener('change', e => {
+  const toolName = e.target.value;
+  const textarea = document.getElementById('args-input');
+  const tool = allTools.find(t => t.name === toolName);
+  if (!tool || !tool.inputSchema) {
+    textarea.value = '';
+    textarea.placeholder = '{}';
+    return;
+  }
+  try {
+    const exampleObj = generateExampleFromSchema(tool.inputSchema);
+    textarea.value = JSON.stringify(exampleObj, null, 2);
+    textarea.placeholder = '{"tableName": "..."}';
+  } catch (err) {
+    textarea.value = '';
+    textarea.placeholder = '{}';
+  }
+});
+
+function generateExampleFromSchema(schema) {
+  const obj = {};
+  if (!schema || !schema.properties) return obj;
+  const props = schema.properties;
+  for (const key in props) {
+    const prop = props[key];
+    // Use explicit default if present
+    if (Object.prototype.hasOwnProperty.call(prop, 'default')) {
+      obj[key] = prop.default;
+      continue;
+    }
+    // Use first enum value if available
+    if (prop.enum && Array.isArray(prop.enum) && prop.enum.length > 0) {
+      obj[key] = prop.enum[0];
+      continue;
+    }
+    // Extract example from description (look for "Example ..." suffix)
+    if (prop.type === 'string' && prop.description) {
+      const exMatch = prop.description.match(/Example\s+(.+)/);
+      if (exMatch) {
+        const ex = exMatch[1].replace(/\.$/, '').split(',')[0].trim();
+        obj[key] = ex;
+        continue;
+      }
+    }
+    switch (prop.type) {
+      case 'string':
+        obj[key] = '...';
+        break;
+      case 'boolean':
+        obj[key] = false;
+        break;
+      case 'integer':
+      case 'number':
+        obj[key] = 0;
+        break;
+      case 'array':
+        if (prop.items && prop.items.type === 'object') {
+          obj[key] = [generateExampleFromSchema(prop.items)];
+        } else if (prop.items && prop.items.type === 'string') {
+          obj[key] = ['...'];
+        } else {
+          obj[key] = [];
+        }
+        break;
+      case 'object':
+        obj[key] = generateExampleFromSchema(prop);
+        break;
+      default:
+        obj[key] = null;
+    }
+  }
+  return obj;
+}
+
 
 // --- Chat ---
 document.getElementById('send-btn').addEventListener('click', sendMessage);
@@ -145,7 +227,11 @@ async function sendMessage() {
   try {
     const res = await fetch('/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'MCP-Protocol-Version': '2025-06-18'
+      },
       body: JSON.stringify({
         jsonrpc: '2.0',
         method: 'tools/call',
@@ -364,6 +450,117 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// --- Chat ---
+document.addEventListener('DOMContentLoaded', () => {
+  const sendBtn = document.getElementById('llm-send-btn');
+  const input = document.getElementById('llm-input');
+
+  if (sendBtn) {
+    sendBtn.addEventListener('click', sendChatMessage);
+  }
+
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
+});
+
+async function sendChatMessage() {
+  const input = document.getElementById('llm-input');
+  const btn = document.getElementById('llm-send-btn');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  input.value = '';
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+
+  try {
+    addChatBubble('user', msg);
+    showChatTyping();
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
+    });
+    const data = await res.json();
+    hideChatTyping();
+    addChatBubble('assistant', data.response || 'No response.');
+  } catch (err) {
+    hideChatTyping();
+    addChatBubble('assistant', 'Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+
+function addChatBubble(role, text) {
+  const area = document.getElementById('llm-messages');
+  const el = document.createElement('div');
+  el.className = 'chat-msg ' + role;
+
+  // Render markdown-like content: code blocks, bold, lists
+  const html = renderChatContent(text);
+  el.innerHTML = html;
+
+  const ts = document.createElement('span');
+  ts.className = 'timestamp';
+  ts.textContent = new Date().toLocaleTimeString();
+  el.appendChild(ts);
+
+  area.appendChild(el);
+  area.scrollTop = area.scrollHeight;
+}
+
+function renderChatContent(text) {
+  // Escape HTML first
+  const esc = escapeHtml(text);
+  // Code blocks (```...```)
+  const withCode = esc.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  // Inline code (`...`)
+  const withInline = withCode.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold (**...**)
+  const withBold = withInline.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Bullet lists (lines starting with • or -)
+  const withLists = withBold.replace(/^[•\-]\s(.+)$/gm, '<li>$1</li>');
+  const hasList = withLists.includes('<li>');
+  // Wrap consecutive <li> in <ul>
+  const withWrapped = hasList ? withLists.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>') : withLists;
+  // Paragraphs: double newlines
+  const withParagraphs = withWrapped.replace(/\n\n/g, '</p><p>');
+  return '<p>' + withParagraphs + '</p>';
+}
+
+function showChatTyping() {
+  const area = document.getElementById('llm-messages');
+  const el = document.createElement('div');
+  el.className = 'chat-typing';
+  el.id = 'chat-typing-indicator';
+  el.innerHTML = '<span></span><span></span><span></span>';
+  area.appendChild(el);
+  area.scrollTop = area.scrollHeight;
+}
+
+function hideChatTyping() {
+  const el = document.getElementById('chat-typing-indicator');
+  if (el) el.remove();
+}
+
+// Add welcome message on load
+window.addEventListener('load', () => {
+  addChatBubble('assistant',
+    'Hello! I can help you manage your DynamoDB tables.\n\n' +
+    'Type **/help** or **/tools** to see available operations.\n' +
+    'Or just ask me something like "list my tables" or "how do I query data?"'
+  );
+});
 
 // --- Init ---
 loadTools();
