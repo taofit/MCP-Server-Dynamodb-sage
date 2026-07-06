@@ -8,17 +8,53 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"strings"
 )
+
+var extContentType = map[string]string{
+	".js":   "application/javascript",
+	".css":  "text/css",
+	".html": "text/html; charset=utf-8",
+	".png":  "image/png",
+	".svg":  "image/svg+xml",
+	".ico":  "image/x-icon",
+	".json": "application/json",
+}
 
 //go:embed static/*
 var dashboardFS embed.FS
 
 func staticFileServer() http.Handler {
-	staticFS, err := fs.Sub(dashboardFS, "static")
-	if err != nil {
-		panic(err)
-	}
-	return http.FileServer(http.FS(staticFS))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		staticFS, err := fs.Sub(dashboardFS, "static")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		if name == "" {
+			name = "index.html"
+		}
+		data, err := fs.ReadFile(staticFS, name)
+		if err != nil {
+			http.Error(w, "Not Found", http.StatusNotFound)
+			return
+		}
+		isJS := strings.HasSuffix(name, ".js")
+		isCSS := strings.HasSuffix(name, ".css")
+		isHTML := strings.HasSuffix(name, ".html")
+
+		if isJS {
+			w.Header().Set("Content-Type", "application/javascript")
+		} else if isCSS {
+			w.Header().Set("Content-Type", "text/css")
+		} else if isHTML {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	})
 }
 
 func (srv *Server) metricsProxy(w http.ResponseWriter, r *http.Request) {

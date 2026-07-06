@@ -54,7 +54,6 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 	output, err := instrumentDynamoDB("query_table", args.TableName, func() (*dynamodb.QueryOutput, error) {
 		return srv.db.Query(ctx, qi)
 	})
-	recordConsumedCapacity("query_table", args.TableName, "RCU", output.ConsumedCapacity)
 
 	if err != nil {
 		var cc *types.ConsumedCapacity
@@ -65,6 +64,8 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 
 		return srv.errorResult(fmt.Sprintf("Error when querying table: %v", err)), nil, nil
 	}
+
+	recordConsumedCapacity("query_table", args.TableName, "RCU", output.ConsumedCapacity)
 	items := []map[string]any{}
 	err = attributevalue.UnmarshalListOfMaps(output.Items, &items)
 	if err != nil {
@@ -129,16 +130,15 @@ func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *
 			ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
 		})
 	})
-	recordConsumedCapacity("put_item", args.TableName, "WCU", output.ConsumedCapacity)
 	if err != nil {
 		var cc *types.ConsumedCapacity
 		if output != nil {
 			cc = output.ConsumedCapacity
 		}
 		srv.sendAuditLog("put_item", args.TableName, "WCU", cc, err)
-
-		return srv.errorResult(fmt.Sprintf("Error when putting item: %v", err)), nil, nil
+		return srv.errorResult(fmt.Sprintf("Error when putting item to table %s: %v", args.TableName, err)), nil, nil
 	}
+	recordConsumedCapacity("put_item", args.TableName, "WCU", output.ConsumedCapacity)
 	srv.sendAuditLog("put_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
 	srv.sendMutationNotification(args.TableName, "put_item", "success", "Item put successfully")
@@ -278,7 +278,6 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 	out, err := instrumentDynamoDB("scan_table", args.TableName, func() (*dynamodb.ScanOutput, error) {
 		return srv.db.Scan(ctx, input)
 	})
-	recordConsumedCapacity("scan_table", args.TableName, "RCU", out.ConsumedCapacity)
 
 	if err != nil {
 		var cc *types.ConsumedCapacity
@@ -288,6 +287,8 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 		srv.sendAuditLog("scan_table", args.TableName, "RCU", cc, err)
 		return srv.errorResult(fmt.Sprintf("Error when scanning table %s: %v", args.TableName, err)), nil, nil
 	}
+
+	recordConsumedCapacity("scan_table", args.TableName, "RCU", out.ConsumedCapacity)
 
 	// Unmarshal the DynamoDB items into a list of plain Go maps
 	items := []map[string]any{}
@@ -529,7 +530,6 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	output, err := instrumentDynamoDB("delete_item", args.TableName, func() (*dynamodb.DeleteItemOutput, error) {
 		return srv.db.DeleteItem(ctx, input)
 	})
-	recordConsumedCapacity("delete_item", args.TableName, "WCU", output.ConsumedCapacity)
 	if err != nil {
 		var consumedCapacity *types.ConsumedCapacity
 		if output != nil {
@@ -538,6 +538,7 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		srv.sendAuditLog("delete_item", args.TableName, "WCU", consumedCapacity, err)
 		return srv.errorResult(fmt.Sprintf("Error when deleting item %v from table %s: %v", args.Key, args.TableName, err)), nil, nil
 	}
+	recordConsumedCapacity("delete_item", args.TableName, "WCU", output.ConsumedCapacity)
 
 	srv.sendAuditLog("delete_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
@@ -575,7 +576,6 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 	output, err := instrumentDynamoDB("get_item", args.TableName, func() (*dynamodb.GetItemOutput, error) {
 		return srv.db.GetItem(ctx, input)
 	})
-	recordConsumedCapacity("get_item", args.TableName, "RCU", output.ConsumedCapacity)
 	if err != nil {
 		var consumedCapacity *types.ConsumedCapacity
 		if output != nil {
@@ -584,6 +584,7 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 		srv.sendAuditLog("get_item", args.TableName, "RCU", consumedCapacity, err)
 		return srv.errorResult(fmt.Sprintf("Error when getting item from table %s: %v", args.TableName, err)), nil, nil
 	}
+	recordConsumedCapacity("get_item", args.TableName, "RCU", output.ConsumedCapacity)
 	item := map[string]any{}
 	attributevalue.UnmarshalMap(output.Item, &item)
 	keyJSON, _ := json.Marshal(args.Key)
@@ -651,7 +652,6 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	output, err := instrumentDynamoDB("update_item", args.TableName, func() (*dynamodb.UpdateItemOutput, error) {
 		return srv.db.UpdateItem(ctx, input)
 	})
-	recordConsumedCapacity("update_item", args.TableName, "WCU", output.ConsumedCapacity)
 	if err != nil {
 		var cc *types.ConsumedCapacity
 		if output != nil {
@@ -660,6 +660,7 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		srv.sendAuditLog("update_item", args.TableName, "WCU", cc, err)
 		return srv.errorResult(fmt.Sprintf("Error when updating item %v from table %s: %v", args.Key, args.TableName, err)), nil, nil
 	}
+	recordConsumedCapacity("update_item", args.TableName, "WCU", output.ConsumedCapacity)
 	srv.sendAuditLog("update_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
 	var attributes map[string]any

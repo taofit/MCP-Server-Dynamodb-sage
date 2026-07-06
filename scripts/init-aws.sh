@@ -15,7 +15,7 @@ awslocal dynamodb create-table \
         AttributeName=user_id,KeyType=HASH \
     --global-secondary-indexes \
         "[{\"IndexName\": \"emailIndex\", \"KeySchema\": [{\"AttributeName\":\"email\",\"KeyType\":\"HASH\"}], \"Projection\": {\"ProjectionType\":\"ALL\"}}]" \
-    --billing-mode PAY_PER_REQUEST
+    --billing-mode PAY_PER_REQUEST || true
 
 echo "✓ Table 'Users' created successfully!"
 
@@ -56,3 +56,10 @@ awslocal dynamodb scan \
     --expression-attribute-values '{ ":email": {"S":"alice@example.com"} }'
 
 echo "✓ Scan complete!"
+# ----------------------------------------------------------------
+# SETUP SSM PARAMETERS (run once per container start)
+awslocal --endpoint-url=http://localhost:4566 ssm put-parameter \
+    --name /myapp/db/region \
+    --value us-west-2 \
+    --type String \
+    --overwrite

@@ -36,7 +36,7 @@ services:
     ports:
       - "4566:4566"
     environment:
-      - SERVICES=iam,sts,dynamodb,s3
+      - SERVICES=iam,sts,dynamodb,s3,ssm
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
       - DYNAMODB_SHARE_DB=1
     volumes:
@@ -46,7 +46,7 @@ services:
       interval: 5s
       timeout: 2s
       retries: 20
-
+ 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
     ports:

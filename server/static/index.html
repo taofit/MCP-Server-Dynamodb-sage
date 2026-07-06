@@ -11,22 +11,32 @@
   <header>
     <h1>DynamoDB-Sage</h1>
     <nav>
-      <button class="tab-btn active" data-tab="chat">Chat</button>
-      <button class="tab-btn" data-tab="notifications">Notifications <span id="notif-badge" class="badge hidden">0</span></button>
-      <button class="tab-btn" data-tab="metrics">Metrics</button>
+    <button class="tab-btn" data-tab="chat">Chat</button>
+    <button class="tab-btn active" data-tab="tools">Tools</button>
+    <button class="tab-btn" data-tab="notifications">Notifications <span id="notif-badge" class="badge hidden">0</span></button>
+    <button class="tab-btn" data-tab="metrics">Metrics</button>
     </nav>
   </header>
 
   <main>
-    <!-- Chat Tab -->
-    <section id="tab-chat" class="tab-content active card">
+    <!-- Tools Tab -->
+    <section id="tab-tools" class="tab-content active card">
       <div id="chat-messages"></div>
       <div id="chat-input-area">
-        <select id="tool-select"><option value="">Select a tool...</option></select>
+        <select id="tool-select"><option value=""></option></select>
         <textarea id="args-input" placeholder='{"tableName": "..."}' rows="3"></textarea>
         <button id="send-btn">Send</button>
       </div>
     </section>
+<section id="tab-chat" class="tab-content card">
+  <div id="llm-messages" class="chat-area"></div>
+  <div id="llm-input-area" class="chat-input-area">
+    <input type="text" id="llm-input" placeholder="Ask the LLM..." />
+    <button id="llm-send-btn">Send</button>
+  </div>
+</section>
+
+  
 
     <!-- Notifications Tab -->
     <section id="tab-notifications" class="tab-content">
