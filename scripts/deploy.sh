@@ -71,6 +71,12 @@ METRICS_ADDR=:2112
 DYNAMO_SAGE_DB=/app/data/audit.db
 DYNAMO_SAGE_ADDR=:8080
 KAFKA_BROKERS=kafka:9092
+LLM_API_KEY_PARAM=/dynamodb-sage/openai/api-key
+LLM_API_KEY=
+LLM_MODEL=gpt-4o-mini
+LLM_TIMEOUT_SEC=30
+LLM_BASE_URL=
+LLM_PROVIDER=openai
 ENVEOF"
 
 echo ""
