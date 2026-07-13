@@ -83,13 +83,34 @@ async function loadTools() {
   const select = document.getElementById('tool-select');
   select.innerHTML = '<option value="">Loading tools...</option>';
   try {
+    const mcpHeaders = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      'MCP-Protocol-Version': '2025-06-18'
+    };
+
+    const initRes = await fetch('/', {
+      method: 'POST',
+      headers: mcpHeaders,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'dynamodb-sage-dashboard', version: '1.0' }
+        },
+        id: nextId++
+      })
+    });
+    if (!initRes.ok) {
+      throw new Error('MCP initialize failed: HTTP ' + initRes.status);
+    }
+    await initRes.json();
+
     const res = await fetch('/', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-        'MCP-Protocol-Version': '2025-06-18'
-      },
+      headers: mcpHeaders,
       body: JSON.stringify({
         jsonrpc: '2.0',
         method: 'tools/list',
@@ -489,9 +510,58 @@ async function sendChatMessage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg })
     });
-    const data = await res.json();
-    hideChatTyping();
-    addChatBubble('assistant', data.response || 'No response.');
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let bubble = null;
+    let lineBuffer = '';
+    let eventBuffer = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      lineBuffer += decoder.decode(value, { stream: true });
+      const lines = lineBuffer.split('\n');
+      lineBuffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          eventBuffer.push(line.slice(6));
+        } else if (line.trim() === '' && eventBuffer.length > 0) {
+          const eventData = eventBuffer.join('\n');
+          eventBuffer = [];
+
+          if (eventData === '[DONE]') continue;
+
+          if (!bubble) {
+            hideChatTyping();
+            bubble = createStreamingBubble();
+          }
+
+          fullText += eventData;
+          updateStreamingBubble(bubble, fullText);
+        }
+      }
+    }
+
+    if (eventBuffer.length > 0) {
+      const eventData = eventBuffer.join('\n');
+      if (eventData && eventData !== '[DONE]') {
+        fullText += eventData;
+        if (bubble) updateStreamingBubble(bubble, fullText);
+      }
+    }
+
+    if (!bubble) {
+      hideChatTyping();
+      addChatBubble('assistant', 'No response.');
+    }
   } catch (err) {
     hideChatTyping();
     addChatBubble('assistant', 'Error: ' + err.message);
@@ -516,6 +586,24 @@ function addChatBubble(role, text) {
   el.appendChild(ts);
 
   area.appendChild(el);
+  area.scrollTop = area.scrollHeight;
+}
+
+function createStreamingBubble() {
+  const area = document.getElementById('llm-messages');
+  const el = document.createElement('div');
+  el.className = 'chat-msg assistant';
+  el.id = 'streaming-bubble';
+  el.innerHTML = '<p></p>';
+  area.appendChild(el);
+  area.scrollTop = area.scrollHeight;
+  return el;
+}
+
+function updateStreamingBubble(el, text) {
+  const html = renderChatContent(text);
+  el.innerHTML = html;
+  const area = document.getElementById('llm-messages');
   area.scrollTop = area.scrollHeight;
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"dynamodb-sage/internal/audit"
 	"dynamodb-sage/internal/engine"
+	"dynamodb-sage/internal/llm"
 	"dynamodb-sage/internal/notification"
 	"dynamodb-sage/internal/queue"
 	"dynamodb-sage/internal/risk"
@@ -14,13 +15,13 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/time/rate"
 )
 
 // Version is set via ldflags at build time.
@@ -52,7 +53,10 @@ type Server struct {
 	sseClients          sync.Map
 	notificationDedup   sync.Map
 	metricsAddr         string
-	toolList []ToolInfo
+	toolList            []ToolInfo
+	toolDefs            []llm.ToolDef
+	llm                 *llm.Client
+	rateLimiter         *rate.Limiter
 }
 
 type ToolInfo struct {
@@ -103,6 +107,20 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 		riskAnalyzer: riskAnalyzer,
 		metricsAddr:  metricsAddr,
 	}
+
+	rps := 5.0
+	if rpsStr := os.Getenv("LLM_RATE_LIMIT_RPS"); rpsStr != "" {
+		if val, err := strconv.ParseFloat(rpsStr, 64); err == nil && val > 0 {
+			rps = val
+		}
+	}
+	burst := 10
+	if burstStr := os.Getenv("LLM_RATE_LIMIT_BURST"); burstStr != "" {
+		if val, err := strconv.Atoi(burstStr); err == nil && val > 0 {
+			burst = val
+		}
+	}
+	srv.rateLimiter = rate.NewLimiter(rate.Limit(rps), burst)
 	if err := srv.initKafkaClient(kafkaConfigPath); err != nil {
 		srv.startWorkerPool()
 		log.Printf("In-process queue started: %v", err)
@@ -121,7 +139,12 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 		return srv.s
 	}, nil)
 	srv.addTools()
-	srv.promServer()
+	srv.toolDefs = srv.buildToolDefs()
+	srv.prometheusServer()
+	if err := srv.initLLM(); err != nil {
+		log.Printf("Failed to init LLM: %v", err)
+		srv.llm = nil
+	}
 
 	return srv
 }
@@ -135,7 +158,7 @@ func (srv *Server) HTTPHandler() http.Handler {
 		DisableLocalhostProtection: true,
 	})
 
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version")
@@ -208,106 +231,10 @@ func (srv *Server) HTTPHandler() http.Handler {
 	})
 }
 
-type chatRequest struct {
-	Message string `json:"message"`
-}
-
-type chatResponse struct {
-	Response string `json:"response"`
-}
-
-func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req chatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
-		return
-	}
-	msg := strings.TrimSpace(req.Message)
-	if msg == "" {
-		json.NewEncoder(w).Encode(chatResponse{Response: "Please enter a message."})
-		return
-	}
-
-	now := time.Now().Unix()
-	srv.store.AddChatHistory("user", "", msg, now)
-
-	resp := srv.generateChatResponse(msg)
-	now = time.Now().Unix()
-	srv.store.AddChatHistory("assistant", "", resp, now)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(chatResponse{Response: resp})
-}
-
-func (srv *Server) generateChatResponse(msg string) string {
-	lower := strings.ToLower(msg)
-
-	switch {
-	case lower == "/help" || lower == "/tools" || lower == "help" || lower == "what can you do":
-		return srv.formatToolList()
-
-	case strings.Contains(lower, "table") && strings.Contains(lower, "list"):
-		return "Use **list_tables** in the Tools tab to list all your DynamoDB tables.\n\nSwitch to the **Tools** tab, select `list_tables`, and click Send (no arguments needed)."
-
-	case strings.Contains(lower, "table") && (strings.Contains(lower, "describe") || strings.Contains(lower, "info")):
-		return "Use **describe_table** in the Tools tab to get details about a specific table.\n\nExample arguments:\n```json\n{\"tableName\": \"your-table-name\"}\n```"
-
-	case strings.Contains(lower, "table") && (strings.Contains(lower, "create") || strings.Contains(lower, "new")):
-		return "Use **create_optimized_table** in the Tools tab to create a new DynamoDB table.\n\nIt supports GSIs, LSIs, tags, and provisioned or on-demand billing."
-
-	case strings.Contains(lower, "table") && (strings.Contains(lower, "delete") || strings.Contains(lower, "remove")):
-		return "Use **delete_table** in the Tools tab to delete a table.\n\n**Warning:** Deleting a table is irreversible. Make sure you have backups!"
-
-	case strings.Contains(lower, "item") && (strings.Contains(lower, "get") || strings.Contains(lower, "find") || strings.Contains(lower, "read")):
-		return "Use **get_item** in the Tools tab to retrieve an item by its primary key, or **query_table** for more complex lookups."
-
-	case strings.Contains(lower, "item") && (strings.Contains(lower, "put") || strings.Contains(lower, "add") || strings.Contains(lower, "insert") || strings.Contains(lower, "create")):
-		return "Use **put_item** in the Tools tab to insert or overwrite an item.\n\nFor multiple items, use **batch_put_items**."
-
-	case strings.Contains(lower, "item") && (strings.Contains(lower, "update") || strings.Contains(lower, "change")):
-		return "Use **update_item** in the Tools tab to modify an existing item.\n\nYou'll need the table name, key, and an update expression."
-
-	case strings.Contains(lower, "item") && (strings.Contains(lower, "delete") || strings.Contains(lower, "remove")):
-		return "Use **delete_item** in the Tools tab to remove an item by its primary key."
-
-	case strings.Contains(lower, "scan"):
-		return "Use **scan_table** in the Tools tab.\n\n⚠️ **Scanning is expensive** – it reads the entire table. Prefer **query_table** when you know the partition key."
-
-	case strings.Contains(lower, "query"):
-		return "Use **query_table** in the Tools tab.\n\nYou need:\n- `tableName` (required)\n- `keyConditionExpression` (required, e.g. `#pk = :pkVal`)\n- `expressionAttributeValues` (required)\n- `expressionAttributeNames` (optional but recommended)"
-
-	case strings.Contains(lower, "audit") || strings.Contains(lower, "log"):
-		return "Use **read_audit_logs** in the Tools tab to see recent DynamoDB operations with timestamps, tables, and capacity consumed."
-
-	case strings.Contains(lower, "job") || strings.Contains(lower, "async"):
-		return "Use **get_job_result** in the Tools tab to check the status of async operations (table creation, batch operations)."
-
-	case strings.Contains(lower, "ttl") || strings.Contains(lower, "time to live"):
-		return "Use **update_table_ttl** in the Tools tab to enable or disable TTL on a table."
-
-	default:
-		return srv.formatToolList()
-	}
-}
-
-func (srv *Server) formatToolList() string {
-	var b strings.Builder
-	b.WriteString("Here are the available DynamoDB operations:\n\n")
-	for _, t := range srv.toolList {
-		b.WriteString("• `" + t.Name + "` — " + t.Description + "\n")
-	}
-	b.WriteString("\nSwitch to the **Tools** tab, select an operation, fill in the arguments as JSON (an example is pre-filled for you), and click Send.")
-	return b.String()
-}
-
-func (srv *Server) promServer() {
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", promhttp.Handler())
-	go http.ListenAndServe(srv.metricsAddr, metricsMux)
+func (srv *Server) initLLM() error {
+	var err error
+	srv.llm, err = llm.NewClient(srv.mcpCtx)
+	return err
 }
 
 func (srv *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {

@@ -100,7 +100,20 @@ func (s *Store) AddChatHistory(user, toolName, content string, timestamp int64) 
 }
 
 func (s *Store) GetChatHistory(limit int) ([]ChatMessage, error) {
-	return nil, nil
+	rows, err := s.db.Query(`SELECT user, tool_name, content, timestamp FROM chat_history ORDER BY timestamp DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var chatHistory []ChatMessage
+	for rows.Next() {
+		var chatMessage ChatMessage
+		if err := rows.Scan(&chatMessage.User, &chatMessage.ToolName, &chatMessage.Content, &chatMessage.Timestamp); err != nil {
+			return nil, err
+		}
+		chatHistory = append(chatHistory, chatMessage)
+	}
+	return chatHistory, nil
 }
 
 func (s *Store) Close() {

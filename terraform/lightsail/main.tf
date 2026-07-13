@@ -132,6 +132,29 @@ resource "aws_iam_user_policy_attachment" "dynamodb_read_write" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
 }
 
+resource "aws_iam_user_policy_attachment" "ssm_read" {
+  user       = aws_iam_user.lightsail.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
+}
+
+# ------------------------------------------------------------------------------
+# SSM parameter for LLM API key (fill value via AWS Console after deploy)
+# ------------------------------------------------------------------------------
+resource "aws_ssm_parameter" "llm_api_key" {
+  name        = "/dynamodb-sage/claude/api-key"
+  description = "API key for LLM provider (Anthropic Claude)"
+  type        = "SecureString"
+  value       = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = {
+    Name = "${var.project_name}-llm-api-key"
+  }
+}
+
 resource "aws_iam_access_key" "lightsail" {
   user = aws_iam_user.lightsail.name
 }
