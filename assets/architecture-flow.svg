@@ -1,212 +1,195 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="950" viewBox="0 0 1300 950" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1200" viewBox="0 0 1100 1200" role="img" aria-labelledby="title desc">
   <title id="title">DynamoDB Sage Architecture Flow</title>
-  <desc id="desc">MCP Client sends tool request. Guardrail + Risk Analyzer checks pass. Small operations execute synchronously against DynamoDB. Large operations are queued to Kafka topic dynamodb-sage-heavy-ops, consumed asynchronously, results published to dynamodb-sage-notifications, and displayed as macOS desktop alerts. Client polls get_job_result for completion.</desc>
-
+  <desc id="desc">Three entry points: MCP Streamable HTTP (/), MCP SSE (/sse), and Chat UI (POST /api/chat). Both MCP and Chat paths share Guardrail, isLargeOperation fork, sync/async execution, and notifications. Chat UI additionally has an agentic loop via Claude API.</desc>
   <defs>
-    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-      <path d="M2,2 L10,6 L2,10 Z" fill="#475569"/>
-    </marker>
-    <marker id="arrow-fail" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-      <path d="M2,2 L10,6 L2,10 Z" fill="#e11d48"/>
-    </marker>
-    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-      <path d="M2,2 L10,6 L2,10 Z" fill="#059669"/>
-    </marker>
+    <marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8Z" fill="#475569"/></marker>
+    <marker id="ar" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8Z" fill="#e11d48"/></marker>
+    <marker id="ag" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8Z" fill="#059669"/></marker>
+    <marker id="ap" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8Z" fill="#7c3aed"/></marker>
+    <marker id="ao" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8Z" fill="#ea580c"/></marker>
     <style>
-      .box { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; rx: 10; }
-      .decision { fill: #fef3c7; stroke: #d97706; stroke-width: 2; rx: 10; }
-      .topic { fill: #ecfdf5; stroke: #059669; stroke-width: 2; rx: 16; }
-      .alert { fill: #fff1f2; stroke: #e11d48; stroke-width: 2; rx: 10; }
-      .storage { fill: #f5f3ff; stroke: #7c3aed; stroke-width: 2; rx: 10; }
-      .sync { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2; rx: 10; }
-      .text { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 18px; fill: #0f172a; font-weight: 600; }
-      .small { font-size: 14px; fill: #475569; font-weight: 500; }
-      .label { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 14px; fill: #334155; font-weight: 600; }
-      .arrow { stroke: #475569; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
-      .arrow-green { stroke: #059669; stroke-width: 2.5; fill: none; marker-end: url(#arrow-green); }
-      .dashed { stroke: #64748b; stroke-width: 2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrow); }
-      .section { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; font-size: 16px; fill: #94a3b8; font-weight: 700; letter-spacing: 1px; }
+      .t{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:22px;fill:#0f172a;font-weight:700}
+      .s{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px;fill:#94a3b8;font-weight:700;letter-spacing:1.5px}
+      .n{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;fill:#0f172a;font-weight:600}
+      .d{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:11px;fill:#64748b}
+      .g{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:10px;font-weight:600}
+      .l{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:10px;fill:#64748b}
     </style>
   </defs>
+  <rect width="1100" height="1200" fill="#fff"/>
 
-  <rect x="0" y="0" width="1300" height="950" fill="#ffffff"/>
-  <text x="40" y="40" class="text" font-size="26">DynamoDB Sage Architecture Flow</text>
+  <text x="550" y="32" text-anchor="middle" class="t">DynamoDB Sage — Architecture Flow</text>
 
-  <!-- ═══════════ 1. TOOL REQUEST & VALIDATION ═══════════ -->
-  <line x1="40" y1="60" x2="1260" y2="60" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="40" y="80" class="section">1. TOOL REQUEST &amp; VALIDATION</text>
+  <!-- ══════ ROW 1: THREE ENTRY POINTS ══════ -->
+  <text x="550" y="60" text-anchor="middle" class="s">ENTRY POINTS</text>
 
-  <!-- MCP Client -->
-  <rect x="60" y="95" width="200" height="60" class="box"/>
-  <text x="160" y="123" text-anchor="middle" class="text">MCP Client</text>
-  <text x="160" y="143" text-anchor="middle" class="small">Claude / opencode</text>
+  <rect x="40" y="72" width="220" height="52" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="150" y="94" text-anchor="middle" class="n">MCP Client</text>
+  <text x="150" y="108" text-anchor="middle" class="d">Claude Desktop / opencode</text>
+  <text x="150" y="118" text-anchor="middle" class="g" fill="#2563eb">POST / (Streamable HTTP)</text>
 
-  <!-- MCP Server -->
-  <rect x="330" y="95" width="200" height="60" class="box"/>
-  <text x="430" y="123" text-anchor="middle" class="text">Go MCP Server</text>
-  <text x="430" y="143" text-anchor="middle" class="small">Tool Handler</text>
+  <rect x="300" y="72" width="220" height="52" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="410" y="94" text-anchor="middle" class="n">MCP Client (Legacy)</text>
+  <text x="410" y="108" text-anchor="middle" class="d">Older MCP clients</text>
+  <text x="410" y="118" text-anchor="middle" class="g" fill="#2563eb">GET /sse</text>
 
-  <!-- Guardrail + Risk -->
-  <rect x="600" y="95" width="240" height="60" class="decision"/>
-  <text x="720" y="123" text-anchor="middle" class="text">Guardrail + Risk</text>
-  <text x="720" y="143" text-anchor="middle" class="small">checkRisk() + validate()</text>
+  <rect x="560" y="72" width="220" height="52" rx="10" fill="#fdf4ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="670" y="94" text-anchor="middle" class="n">Chat UI</text>
+  <text x="670" y="108" text-anchor="middle" class="d">Browser dashboard</text>
+  <text x="670" y="118" text-anchor="middle" class="g" fill="#7c3aed">POST /api/chat (SSE)</text>
 
-  <!-- Arrow: Client → Server -->
-  <path class="arrow" d="M260 125 L330 125"/>
+  <!-- ══════ ROW 2: SERVERS ══════ -->
+  <text x="550" y="155" text-anchor="middle" class="s">SERVERS</text>
 
-  <!-- Arrow: Server → Guardrail -->
-  <path class="arrow" d="M530 125 L600 125"/>
+  <rect x="40" y="168" width="220" height="48" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="150" y="196" text-anchor="middle" class="n">Go MCP Server</text>
 
-  <!-- Guardrail fail arrow (down) -->
-  <path class="arrow" d="M720 155 L720 195" style="marker-end: url(#arrow-fail); stroke: #e11d48;"/>
-  <text x="735" y="183" class="label" fill="#e11d48">Fail → return error</text>
+  <rect x="300" y="168" width="220" height="48" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="410" y="196" text-anchor="middle" class="n">Go MCP Server</text>
 
-  <!-- ═══════════ 2. OPERATION FORK ═══════════ -->
-  <line x1="40" y1="215" x2="1260" y2="215" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="40" y="235" class="section">2. OPERATION FORK</text>
+  <rect x="560" y="168" width="220" height="48" rx="10" fill="#fefce8" stroke="#eab308" stroke-width="2"/>
+  <text x="670" y="190" text-anchor="middle" class="n">Anthropic Claude API</text>
+  <text x="670" y="204" text-anchor="middle" class="d">Messages + Tools (stream)</text>
 
-  <!-- isLargeOperation decision -->
-  <rect x="600" y="250" width="240" height="55" class="decision"/>
-  <text x="720" y="275" text-anchor="middle" class="text">isLargeOperation()</text>
-  <text x="720" y="293" text-anchor="middle" class="small">batch_put / batch_delete / create_table</text>
+  <!-- Arrows row 1 → 2 -->
+  <path d="M150 124 L150 168" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M410 124 L410 168" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#a)"/>
+  <path d="M670 124 L670 168" fill="none" stroke="#a855f7" stroke-width="2" marker-end="url(#ap)"/>
 
-  <!-- Arrow: Guardrail → isLargeOperation -->
-  <path class="arrow" d="M720 155 L720 250"/>
+  <!-- ══════ ROW 3: SHARED PIPELINE — BOTH PATHS ══════ -->
+  <text x="400" y="248" text-anchor="middle" class="s">SHARED PIPELINE — MCP &amp; CHAT PATHS</text>
 
-  <!-- Small op branch (left) -->
-  <text x="310" y="275" class="label" fill="#16a34a">Small op</text>
-  <path class="arrow-green" d="M600 277 L480 277 L480 330"/>
+  <!-- Guardrail + Risk (shared) -->
+  <rect x="40" y="262" width="220" height="44" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <text x="150" y="289" text-anchor="middle" class="n">Guardrail + Risk</text>
+  <text x="150" y="300" text-anchor="middle" class="l">RISK_LEVELS mapping</text>
 
-  <!-- Large op branch (right) -->
-  <text x="860" y="275" class="label" fill="#d97706">Large op (async)</text>
-  <path class="arrow" d="M840 277 L980 277 L980 330"/>
+  <!-- Both MCP servers → Guardrail -->
+  <path d="M150 216 L150 262" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M410 216 L410 240 L150 240 L150 262" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#a)"/>
 
-  <!-- ═══════════ 3. SYNC PATH (SMALL OPS) ═══════════ -->
-  <line x1="40" y1="310" x2="1260" y2="310" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="40" y="330" class="section">3. SYNC PATH (SMALL OPS)</text>
+  <!-- isLargeOperation? -->
+  <rect x="40" y="330" width="220" height="44" rx="22" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <text x="150" y="357" text-anchor="middle" class="n">isLargeOperation?</text>
 
-  <!-- DynamoDB call -->
-  <rect x="330" y="345" width="200" height="55" class="sync"/>
-  <text x="430" y="373" text-anchor="middle" class="text">DynamoDB</text>
-  <text x="430" y="393" text-anchor="middle" class="small">Direct write / read</text>
+  <path d="M150 306 L150 330" fill="none" stroke="#d97706" stroke-width="2" marker-end="url(#a)"/>
+  <text x="165" y="322" class="g" fill="#d97706">risk ok</text>
 
-  <!-- Arrow: to DynamoDB -->
-  <path class="arrow-green" d="M430 277 L430 345"/>
+  <!-- ══════ ROW 4: SYNC PATH ══════ -->
+  <text x="150" y="400" text-anchor="middle" class="s" fill="#16a34a">SYNC</text>
 
-  <!-- Return result -->
-  <path class="arrow-green" d="M430 400 L430 435"/>
-  <rect x="330" y="440" width="200" height="55" class="box"/>
-  <text x="430" y="468" text-anchor="middle" class="text">Return Response</text>
-  <text x="430" y="488" text-anchor="middle" class="small">Sync result to client</text>
+  <rect x="40" y="410" width="200" height="40" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="140" y="435" text-anchor="middle" class="n" fill="#16a34a">DynamoDB (direct)</text>
 
-  <!-- Arrow back to client -->
-  <path class="arrow" d="M330 467 L260 467" stroke-dasharray="8 6"/>
-  <text x="295" y="455" class="label">result</text>
+  <path d="M150 374 L150 410" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#ag)"/>
+  <text x="165" y="396" class="g" fill="#16a34a">sync</text>
 
-  <!-- ═══════════ 4. ASYNC PATH (LARGE OPS) ═══════════ -->
-  <line x1="570" y1="310" x2="1260" y2="310" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="570" y="330" class="section">4. ASYNC PATH (LARGE OPS)</text>
+  <rect x="40" y="470" width="200" height="40" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="140" y="495" text-anchor="middle" class="n">Result</text>
 
-  <!-- Store job -->
-  <rect x="860" y="345" width="200" height="55" class="storage"/>
-  <text x="960" y="373" text-anchor="middle" class="text">Store JobResult</text>
-  <text x="960" y="393" text-anchor="middle" class="small">sync.Map (UUID key)</text>
+  <path d="M140 450 L140 470" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#ag)"/>
 
-  <!-- Return Job ID to client -->
-  <rect x="860" y="440" width="200" height="55" class="box"/>
-  <text x="960" y="468" text-anchor="middle" class="text">Return Job ID</text>
-  <text x="960" y="488" text-anchor="middle" class="small">"queued" acknowledgment</text>
+  <!-- ══════ ROW 4: ASYNC PATH ══════ -->
+  <text x="370" y="400" text-anchor="middle" class="s" fill="#d97706">ASYNC</text>
 
-  <path class="arrow" d="M960 400 L960 440"/>
-  <path class="arrow" d="M860 467 L700 467" stroke-dasharray="8 6"/>
-  <text x="780" y="455" class="label">job ID</text>
+  <rect x="270" y="410" width="200" height="40" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="370" y="435" text-anchor="middle" class="n">Kafka Producer</text>
 
-  <!-- Kafka producer -->
-  <rect x="1120" y="345" width="160" height="55" class="box"/>
-  <text x="1200" y="373" text-anchor="middle" class="text">Kafka Producer</text>
-  <text x="1200" y="393" text-anchor="middle" class="small">Send heavy op</text>
+  <path d="M260 352 L370 352 L370 410" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
 
-  <path class="arrow" d="M1060 372 L1120 372"/>
+  <rect x="270" y="470" width="200" height="40" rx="20" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <text x="370" y="495" text-anchor="middle" class="n" fill="#059669">dynamodb-sage-heavy-ops</text>
 
-  <!-- Topic: heavy-ops -->
-  <rect x="1120" y="440" width="160" height="55" class="topic"/>
-  <text x="1200" y="468" text-anchor="middle" class="text">Topic 1</text>
-  <text x="1200" y="488" text-anchor="middle" class="small">dynamodb-sage-heavy-ops</text>
+  <path d="M370 450 L370 470" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
 
-  <path class="arrow" d="M1200 400 L1200 440"/>
+  <rect x="270" y="530" width="200" height="40" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="370" y="555" text-anchor="middle" class="n">Job ID → Client</text>
 
-  <!-- ═══════════ 5. ASYNC EXECUTION ═══════════ -->
-  <line x1="40" y1="520" x2="1260" y2="520" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="40" y="540" class="section">5. ASYNC EXECUTION (KAFKA CONSUMER)</text>
+  <path d="M370 510 L370 530" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
 
-  <!-- Kafka Consumer -->
-  <rect x="60" y="555" width="340" height="55" class="box"/>
-  <text x="230" y="583" text-anchor="middle" class="text">Kafka Consumer Group</text>
-  <text x="230" y="603" text-anchor="middle" class="small">dynamodb-sage-workers (multi-topic)</text>
+  <!-- ══════ ROW 5: KAFKA CONSUMER ══════ -->
+  <text x="200" y="608" text-anchor="middle" class="s">KAFKA CONSUMER</text>
 
-  <path class="arrow" d="M1120 495 L230 495 L230 555"/>
+  <rect x="40" y="620" width="240" height="38" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="160" y="644" text-anchor="middle" class="n">Kafka Consumer Group</text>
 
-  <!-- processHeavyOp -->
-  <rect x="460" y="555" width="300" height="55" class="box"/>
-  <text x="610" y="583" text-anchor="middle" class="text">processHeavyOp()</text>
-  <text x="610" y="603" text-anchor="middle" class="small">Parse payload, load job from storage</text>
+  <path d="M370 570 L370 590 L160 590 L160 620" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
 
-  <path class="arrow" d="M400 582 L460 582"/>
+  <rect x="40" y="678" width="240" height="38" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="160" y="702" text-anchor="middle" class="n">processHeavyOp()</text>
 
-  <!-- executeJobOp -->
-  <rect x="460" y="650" width="300" height="55" class="box"/>
-  <text x="610" y="678" text-anchor="middle" class="text">executeJobOp()</text>
-  <text x="610" y="698" text-anchor="middle" class="small">batchPutItems / batchDeleteItems / createTable</text>
+  <path d="M160 658 L160 678" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
 
-  <path class="arrow" d="M610 610 L610 650"/>
+  <rect x="40" y="736" width="240" height="38" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="160" y="760" text-anchor="middle" class="n">executeJobOp()</text>
 
-  <!-- DynamoDB -->
-  <rect x="830" y="650" width="200" height="55" class="box"/>
-  <text x="930" y="678" text-anchor="middle" class="text">Amazon DynamoDB</text>
+  <path d="M160 716 L160 736" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
 
-  <path class="arrow" d="M760 677 L830 677"/>
-  <text x="795" y="667" class="label">writes</text>
+  <rect x="340" y="736" width="160" height="38" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="420" y="760" text-anchor="middle" class="n" fill="#16a34a">DynamoDB</text>
 
-  <!-- close Done -->
-  <path class="arrow" d="M610 705 L610 745"/>
-  <text x="625" y="730" class="label">close(jr.Done)</text>
+  <path d="M280 755 L340 755" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#ag)"/>
+  <text x="310" y="745" class="l">batch write</text>
 
-  <!-- ═══════════ 6. NOTIFICATION ═══════════ -->
-  <line x1="40" y1="730" x2="1260" y2="730" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="40" y="750" class="section">6. RESULT NOTIFICATION</text>
+  <!-- ══════ ROW 6: NOTIFICATIONS ══════ -->
+  <text x="700" y="608" text-anchor="middle" class="s">NOTIFICATIONS</text>
 
-  <!-- SendNotification -->
-  <rect x="460" y="765" width="300" height="55" class="alert"/>
-  <text x="610" y="793" text-anchor="middle" class="text">SendNotification()</text>
-  <text x="610" y="813" text-anchor="middle" class="small">Publish success/error to notifications topic</text>
+  <rect x="570" y="620" width="220" height="38" rx="10" fill="#fff1f2" stroke="#e11d48" stroke-width="2"/>
+  <text x="680" y="644" text-anchor="middle" class="n" fill="#e11d48">sendMutationNotif()</text>
 
-  <path class="arrow" d="M610 745 L610 765"/>
+  <path d="M160 774 L160 800 L680 800 L680 658" fill="none" stroke="#e11d48" stroke-width="2" marker-end="url(#ar)"/>
 
-  <!-- Topic: notifications -->
-  <rect x="460" y="855" width="300" height="55" class="topic"/>
-  <text x="610" y="883" text-anchor="middle" class="text">Topic 2</text>
-  <text x="610" y="903" text-anchor="middle" class="small">dynamodb-sage-notifications</text>
+  <rect x="570" y="678" width="220" height="38" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+  <text x="680" y="702" text-anchor="middle" class="n" fill="#ea580c">SSE → Chat UI</text>
 
-  <path class="arrow" d="M610 820 L610 855"/>
+  <path d="M680 658 L680 678" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#ao)"/>
 
-  <!-- processNotification -->
-  <rect x="830" y="765" width="300" height="55" class="box"/>
-  <text x="980" y="793" text-anchor="middle" class="text">processNotification()</text>
-  <text x="980" y="813" text-anchor="middle" class="small">Dispatch by topic handler</text>
+  <rect x="570" y="736" width="220" height="38" rx="19" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <text x="680" y="760" text-anchor="middle" class="n" fill="#059669">dynamodb-sage-notifications</text>
 
-  <path class="arrow" d="M760 792 L830 792"/>
+  <path d="M790 697 L830 697 L830 755 L790 755" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#ag)"/>
 
-  <!-- macOS Notification -->
-  <rect x="830" y="855" width="300" height="55" class="alert"/>
-  <text x="980" y="883" text-anchor="middle" class="text">macOS Notification</text>
-  <text x="980" y="903" text-anchor="middle" class="small">SendUINotify() via osascript</text>
+  <!-- ══════ ROW 7: CHAT AGENTIC LOOP (right side) ══════ -->
+  <text x="860" y="248" text-anchor="middle" class="s">CHAT AGENTIC LOOP</text>
 
-  <path class="arrow" d="M980 820 L980 855"/>
+  <rect x="780" y="262" width="180" height="44" rx="10" fill="#fdf4ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="870" y="289" text-anchor="middle" class="n" fill="#7c3aed">executeToolByName()</text>
 
-  <!-- ═══════════ 7. JOB POLLING ═══════════ -->
+  <rect x="780" y="330" width="180" height="44" rx="10" fill="#fdf4ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="870" y="357" text-anchor="middle" class="n" fill="#7c3aed">ToolResult → Claude</text>
 
-  <!-- Client poll arrow (top) -->
-  <path class="arrow" d="M700 467 L700 417" stroke-dasharray="8 6"/>
-  <text x="690" y="405" class="label">get_job_result(id)</text>
+  <!-- Claude → executeToolByName -->
+  <path d="M780 192 L870 192 L870 262" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#ap)"/>
+  <text x="885" y="230" class="g" fill="#7c3aed">tool_use</text>
+
+  <!-- Guardrail → executeToolByName -->
+  <path d="M260 284 L780 284" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#ap)"/>
+  <text x="520" y="274" class="g" fill="#7c3aed">risk ok → tool params</text>
+
+  <!-- executeToolByName → ToolResult -->
+  <path d="M870 306 L870 330" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#ap)"/>
+
+  <!-- ToolResult → loop back to Claude -->
+  <path d="M780 352 L720 352 L720 192 L780 192" fill="none" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#ap)"/>
+  <text x="710" y="272" class="g" fill="#7c3aed" transform="rotate(-90,710,272)">agentic loop</text>
+
+  <!-- Text response → stream back to Chat UI -->
+  <path d="M780 192 L720 192 L720 98 L660 98" fill="none" stroke="#059669" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+  <text x="720" y="148" class="l" fill="#059669">text (SSE stream)</text>
+
+  <!-- Fail path -->
+  <path d="M960 284 L1020 284" fill="none" stroke="#e11d48" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="990" y="274" class="g" fill="#e11d48">Fail → error</text>
+
+  <!-- ══════ LEGEND ══════ -->
+  <rect x="40" y="850" width="1020" height="48" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="60" y="870" class="s">LEGEND</text>
+  <rect x="60" y="880" width="12" height="12" rx="3" fill="#eff6ff" stroke="#2563eb"/><text x="80" y="891" class="l">MCP Protocol</text>
+  <rect x="180" y="880" width="12" height="12" rx="3" fill="#fdf4ff" stroke="#a855f7"/><text x="200" y="891" class="l">Chat / Agentic</text>
+  <rect x="310" y="880" width="12" height="12" rx="3" fill="#fef3c7" stroke="#d97706"/><text x="330" y="891" class="l">Guardrail</text>
+  <rect x="420" y="880" width="12" height="12" rx="3" fill="#f0fdf4" stroke="#16a34a"/><text x="440" y="891" class="l">Sync DynamoDB</text>
+  <rect x="560" y="880" width="12" height="12" rx="3" fill="#ecfdf5" stroke="#059669"/><text x="580" y="891" class="l">Kafka / Async</text>
+  <rect x="690" y="880" width="12" height="12" rx="3" fill="#fff1f2" stroke="#e11d48"/><text x="710" y="891" class="l">Alert</text>
+  <rect x="780" y="880" width="12" height="12" rx="3" fill="#fff7ed" stroke="#ea580c"/><text x="800" y="891" class="l">SSE Stream</text>
 
 </svg>

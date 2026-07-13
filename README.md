@@ -118,7 +118,7 @@ npx @modelcontextprotocol/inspector --transport http http://localhost:8081
 
 ---
 
-## 🌐 AWS Deployment (Lightsail — Active, $5/mo)
+## 🌐 AWS Deployment (Lightsail)
 
 A single Lightsail instance runs the full stack (app + Kafka + Zookeeper) in Docker via Compose.
 nginx + Let's Encrypt provide HTTPS with your own domain.
@@ -132,7 +132,7 @@ terraform apply
 ```
 
 This creates:
-- Lightsail instance (`nano_3_0`, Ubuntu 22.04, Docker pre-installed)
+- Lightsail instance (Ubuntu 22.04, Docker pre-installed)
 - Static IP address
 - SSH key (`keys/lightsail.pem`)
 - IAM user with `AmazonDynamoDBFullAccess` + `AmazonSSMReadOnlyAccess` (`keys/lightsail-credentials.ini`)
@@ -245,7 +245,7 @@ The script skips nginx/certbot setup on subsequent runs.
 | Component | Detail |
 |-----------|--------|
 | **Region** | `eu-north-1` |
-| **Compute** | Lightsail `nano_3_0` (2 vCPU, 0.5 GiB, 20 GB SSD) |
+| **Compute** | Lightsail instance (Ubuntu 22.04, 2 vCPU, 1 GiB RAM, 20 GB SSD) |
 | **App** | Go binary in Docker (pre-built locally, copied via tarball) |
 | **Queue** | Apache Kafka in Docker (Confluent 7.6.0) |
 | **LLM** | Anthropic Claude via `LLM_API_KEY` or SSM `/dynamodb-sage/claude/api-key` |
