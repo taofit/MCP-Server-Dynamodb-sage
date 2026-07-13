@@ -214,7 +214,7 @@ The dashboard includes a built-in **AI chat assistant** powered by Claude. It ca
 |----------|----------|---------|-------------|
 | `LLM_API_KEY` | No | — | Anthropic API key (`sk-ant-...`). If empty, falls back to SSM via `LLM_API_KEY_PARAM` |
 | `LLM_API_KEY_PARAM` | No | `/dynamodb-sage/claude/api-key` | SSM parameter path for API key |
-| `LLM_MODEL` | No | `claude-sonnet-4-20250514` | Model to use |
+| `LLM_MODEL` | No | `claude-sonnet-5` | Model to use |
 | `LLM_BASE_URL` | No | `https://api.anthropic.com` | API base URL (for proxies) |
 | `LLM_TIMEOUT_SEC` | No | `30` | Request timeout in seconds |
 

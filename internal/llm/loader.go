@@ -15,7 +15,7 @@ const DefaultMaxTokens = 1024 * 4
 func LoadConfig(ctx context.Context) (*Config, error) {
 	model := os.Getenv("LLM_MODEL")
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = "claude-sonnet-5"
 	}
 	baseURL := os.Getenv("LLM_BASE_URL")
 	if baseURL == "" {

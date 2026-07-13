@@ -9,11 +9,17 @@ SSH_KEY="$DIR/keys/lightsail.pem"
 TARBALL="/tmp/${APP_NAME}.tar.gz"
 DEPLOY_DIR="/tmp/${APP_NAME}-deploy"
 
-echo "=== Step 1: Get Lightsail IP from Terraform ==="
+echo "=== Step 1: Get Lightsail IP ==="
 cd "$TF_DIR"
-IP=$(terraform output -raw static_ip 2>/dev/null || true)
+IP="${LIGHTSAIL_IP:-$(aws lightsail get-instance --instance-name Ubuntu-1 --region eu-north-1 --query 'instance.publicIpAddress' --output text 2>/dev/null || true)}"
+if [ -z "$IP" ] || [ "$IP" = "None" ]; then
+  IP="${LIGHTSAIL_IP:-$(aws lightsail get-static-ips --region eu-north-1 --query 'staticIps[?attachedTo==`Ubuntu-1`].ipAddress' --output text 2>/dev/null || true)}"
+fi
+if [ -z "$IP" ] || [ "$IP" = "None" ]; then
+  IP=$(terraform output -raw static_ip 2>/dev/null || true)
+fi
 if [ -z "$IP" ]; then
-  echo "Terraform not applied yet. Run: cd $TF_DIR && terraform apply"
+  echo "Could not find Lightsail IP. Run: cd $TF_DIR && terraform apply"
   exit 1
 fi
 echo "  IP: $IP"
@@ -73,7 +79,7 @@ DYNAMO_SAGE_ADDR=:8080
 KAFKA_BROKERS=kafka:9092
 LLM_API_KEY_PARAM=/dynamodb-sage/claude/api-key
 LLM_API_KEY=
-LLM_MODEL=claude-sonnet-4-20250514
+LLM_MODEL=claude-sonnet-5
 LLM_TIMEOUT_SEC=30
 LLM_BASE_URL=
 ENVEOF"

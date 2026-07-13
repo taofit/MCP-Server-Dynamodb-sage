@@ -59,7 +59,7 @@ services:
     environment:
       - ZOOKEEPER_CLIENT_PORT=2181
       - ZOOKEEPER_TICK_TIME=2000
-      - KAFKA_HEAP_OPTS=-Xmx128m -Xms64m
+      - KAFKA_HEAP_OPTS=-Xmx64m -Xms32m
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     restart: always
@@ -78,10 +78,11 @@ services:
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_HEAP_OPTS=-Xmx384m -Xms192m
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
       - KAFKA_DELETE_TOPIC_ENABLE=true
     healthcheck:
-      test: ["CMD", "bash", "-c", "nc -z kafka 9092"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 60
