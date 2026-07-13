@@ -1414,10 +1414,28 @@ func (srv *Server) processHeavyOpForQueue(key string, payload []byte) error {
 		return fmt.Errorf("job not found: %s", key)
 	}
 	jr := jobResult.(*JobResult)
-	srv.executeJobOp(jr, payload)
-	if jr.Error != nil {
+
+	jobPayload := struct {
+		Input     json.RawMessage `json:"input"`
+		Operation string          `json:"operation"`
+	}{}
+	if err := json.Unmarshal(payload, &jobPayload); err != nil {
+		jr.Error = fmt.Errorf("failed to unmarshal job payload: %v", err)
+		srv.sendMutationNotification("unknown", jobPayload.Operation, "error", jr.Error.Error())
 		return jr.Error
 	}
+
+	// Extract table name from input
+	var tableName struct{ TableName string }
+	json.Unmarshal(jobPayload.Input, &tableName)
+
+	srv.executeJobOp(jr, payload)
+
+	if jr.Error != nil {
+		srv.sendMutationNotification(tableName.TableName, jobPayload.Operation, "error", jr.Error.Error())
+		return jr.Error
+	}
+	srv.sendMutationNotification(tableName.TableName, jobPayload.Operation, "success", "completed")
 	return nil
 }
 

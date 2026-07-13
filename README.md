@@ -52,13 +52,13 @@ The project uses **Docker Compose** to run all services locally:
 | Kafka        | —         | yes     |
 | LocalStack   | `local`   | no      |
 
-1. Copy the environment template and configure your LocalStack auth token:
+1. Copy the environment template and configure your variables:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Edit `.env` and set your variables, e.g.:
+2. Edit `.env` and set your variables:
 
 ```bash
 LOCALSTACK_AUTH_TOKEN=your_token_here
@@ -100,7 +100,7 @@ AWS_ACCESS_KEY_ID=your_key_id \
 AWS_SECRET_ACCESS_KEY=your_secret_key \
 MCP_TRANSPORT_MODE=http \
 DYNAMO_SAGE_ADDR=":8081" \
-go run main.go
+go run .
 ```
 
 > Kafka on `localhost:9093` (PLAINTEXT_HOST listener) and LocalStack on `localhost:4566` are the host-mapped ports from Docker.
@@ -135,7 +135,8 @@ This creates:
 - Lightsail instance (`nano_3_0`, Ubuntu 22.04, Docker pre-installed)
 - Static IP address
 - SSH key (`keys/lightsail.pem`)
-- IAM user with `AmazonDynamoDBFullAccess` (`keys/lightsail-credentials.ini`)
+- IAM user with `AmazonDynamoDBFullAccess` + `AmazonSSMReadOnlyAccess` (`keys/lightsail-credentials.ini`)
+- SSM parameter `/dynamodb-sage/claude/api-key` (empty placeholder — fill via AWS Console after deploy)
 - Firewall rules (ports 22, 80, 443)
 
 ### Deploy the app
@@ -153,6 +154,26 @@ The script:
 6. **First time only**: installs nginx + certbot for HTTPS
 7. Runs `docker compose up -d --build` to start app, Kafka, and Zookeeper
 
+### Set the LLM API key
+
+After the first deploy, set your Anthropic API key in SSM:
+
+```bash
+# Via AWS Console: SSM → Parameter Store → /dynamodb-sage/claude/api-key → edit value
+# Or via CLI:
+aws ssm put-parameter \
+  --name "/dynamodb-sage/claude/api-key" \
+  --value "sk-ant-your-key" \
+  --type "SecureString" \
+  --overwrite
+```
+
+The app reads the key from SSM on startup. Restart the container after updating:
+
+```bash
+ssh -i keys/lightsail.pem ubuntu@<IP> "cd /opt/dynamodb-sage && sudo docker compose restart app"
+```
+
 ### Verify
 
 ```bash
@@ -164,12 +185,40 @@ curl https://dynamodb-sage.yourdomain.com/health
 
 Open `https://dynamodb-sage.yourdomain.com/` in a browser. The dashboard is served from the same Go binary — no separate deployment needed.
 
-| Page | Route |
-|------|-------|
-| Metrics overview | `/` |
-| Chat interface | `/chat` |
-| Notification history | `/notifications` |
-| Audit log viewer | `/audit` |
+| Page | Route | Description |
+|------|-------|-------------|
+| Chat interface | `/` | LLM-powered chat with tool use (see below) |
+| Tools explorer | MCP protocol | List and invoke DynamoDB tools |
+| Notification history | `/api/notifications` | Real-time push notifications |
+| Audit log viewer | `/api/metrics` | Prometheus metrics |
+
+### 💬 Chat Function
+
+The dashboard includes a built-in **AI chat assistant** powered by Claude. It can call any DynamoDB tool on your behalf — just describe what you want in natural language.
+
+**How it works:**
+1. User sends a message via the chat UI
+2. Message is streamed to Claude via `POST /api/chat` (SSE)
+3. Claude can call tools (e.g. `list_tables`, `query_table`) and reason over results
+4. Responses stream back token-by-token to the UI
+
+**Example prompts:**
+- *"List all my DynamoDB tables"*
+- *"Show me the schema of the users table"*
+- *"Query the orders table where userId = 123"*
+- *"How many items are in each table?"*
+
+**Configuration (env vars):**
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `LLM_API_KEY` | No | — | Anthropic API key (`sk-ant-...`). If empty, falls back to SSM via `LLM_API_KEY_PARAM` |
+| `LLM_API_KEY_PARAM` | No | `/dynamodb-sage/claude/api-key` | SSM parameter path for API key |
+| `LLM_MODEL` | No | `claude-sonnet-4-20250514` | Model to use |
+| `LLM_BASE_URL` | No | `https://api.anthropic.com` | API base URL (for proxies) |
+| `LLM_TIMEOUT_SEC` | No | `30` | Request timeout in seconds |
+
+> At least one of `LLM_API_KEY` or a valid `LLM_API_KEY_PARAM` SSM parameter must be available for chat to work.
 
 The Prometheus metrics endpoint is not exposed publicly (port `:2112` is internal to the container). To scrape metrics, point your Prometheus server at `http://dynamodb-sage:2112/metrics` within the Docker network, or expose `METRICS_ADDR=:8081` to serve metrics on the same port under `/metrics`.
 
@@ -199,11 +248,12 @@ The script skips nginx/certbot setup on subsequent runs.
 | **Compute** | Lightsail `nano_3_0` (2 vCPU, 0.5 GiB, 20 GB SSD) |
 | **App** | Go binary in Docker (pre-built locally, copied via tarball) |
 | **Queue** | Apache Kafka in Docker (Confluent 7.6.0) |
+| **LLM** | Anthropic Claude via `LLM_API_KEY` or SSM `/dynamodb-sage/claude/api-key` |
 | **Port** | 8080 |
 | **Transport** | Streamable HTTP (POST `/`) + SSE (`GET /sse`), health at `/health` |
 | **HTTPS** | Let's Encrypt via certbot + nginx reverse proxy |
 | **Domain** | Your own domain (A record at DNS provider) |
-| **IAM** | Dedicated IAM user with `AmazonDynamoDBFullAccess` |
+| **IAM** | Dedicated IAM user with `AmazonDynamoDBFullAccess` + `AmazonSSMReadOnlyAccess` |
 | **Logs** | `sudo docker compose logs app` |
 
 ---
@@ -234,7 +284,7 @@ terraform apply
   "mcpServers": {
     "dynamo-sage-local": {
       "type": "local",
-      "command": ["go", "run", "main.go"],
+      "command": ["go", "run", "."],
       "enabled": true
     },
     "dynamo-sage-aws": {
@@ -255,7 +305,7 @@ terraform apply
   "mcpServers": {
     "dynamodb-sage-local": {
       "command": "sh",
-      "args": ["-c", "cd /path/to/dynamodb-sage && KAFKA_BROKERS=localhost:9093 AWS_BASE_ENDPOINT=http://localhost:4566 AWS_REGION=eu-north-1 go run main.go"]
+      "args": ["-c", "cd /path/to/dynamodb-sage && KAFKA_BROKERS=localhost:9093 AWS_BASE_ENDPOINT=http://localhost:4566 AWS_REGION=eu-north-1 go run ."]
     }
   }
 }

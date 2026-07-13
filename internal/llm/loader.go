@@ -4,30 +4,27 @@ import (
 	"context"
 
 	"dynamodb-sage/internal/awsparam"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 )
 
-func envOr(key string, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
-	}
-	return fallback
-}
+const DefaultMaxTokens = 1024 * 4
 
 func LoadConfig(ctx context.Context) (*Config, error) {
-	provider := envOr("LLM_PROVIDER", "openai")
-	model := envOr("LLM_MODEL", "gpt-4o-mini")
-	baseURL := envOr("LLM_BASE_URL", "https://api.openai.com/v1")
-	// If the environment variable is set but empty, use the default URL
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
+	model := os.Getenv("LLM_MODEL")
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
 	}
-	timeoutSecStr := envOr("LLM_TIMEOUT_SEC", "30")
-	systemPrompt := envOr("LLM_SYSTEM_PROMPT", DefaultSystemPrompt)
+	baseURL := os.Getenv("LLM_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+	timeoutSecStr := os.Getenv("LLM_TIMEOUT_SEC")
+	if timeoutSecStr == "" {
+		timeoutSecStr = "30"
+	}
 
 	timeoutSec, err := strconv.Atoi(timeoutSecStr)
 	if err != nil {
@@ -36,9 +33,9 @@ func LoadConfig(ctx context.Context) (*Config, error) {
 	
 	apiKey := os.Getenv("LLM_API_KEY")
 	if apiKey == "" {
-		paramName := envOr("LLM_API_KEY_PARAM", "/dynamodb-sage/openai/api-key")
+		paramName := os.Getenv("LLM_API_KEY_PARAM")
 		if paramName == "" {
-			return nil, errors.New("LLM_API_KEY_PARAM is not set")
+			paramName = "/dynamodb-sage/claude/api-key"
 		}
 		var err error
 		apiKey, err = awsparam.GetSSMParam(ctx, paramName)
@@ -47,11 +44,11 @@ func LoadConfig(ctx context.Context) (*Config, error) {
 		}
 	}
 	return &Config{
-		Provider:     provider,
 		APIKey:       apiKey,
 		Model:        model,
 		BaseURL:      baseURL,
 		Timeout:      time.Duration(timeoutSec) * time.Second,
-		SystemPrompt: systemPrompt,
+		SystemPrompt: DefaultSystemPrompt,
+		MaxTokens:    DefaultMaxTokens,
 	}, nil
 }

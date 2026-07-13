@@ -53,9 +53,10 @@ type Server struct {
 	sseClients          sync.Map
 	notificationDedup   sync.Map
 	metricsAddr         string
-	toolList []ToolInfo
-	llm *llm.Client
-	rateLimiter *rate.Limiter
+	toolList            []ToolInfo
+	toolDefs            []llm.ToolDef
+	llm                 *llm.Client
+	rateLimiter         *rate.Limiter
 }
 
 type ToolInfo struct {
@@ -138,7 +139,8 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 		return srv.s
 	}, nil)
 	srv.addTools()
-	srv.promServer()
+	srv.toolDefs = srv.buildToolDefs()
+	srv.prometheusServer()
 	if err := srv.initLLM(); err != nil {
 		log.Printf("Failed to init LLM: %v", err)
 		srv.llm = nil
@@ -156,7 +158,7 @@ func (srv *Server) HTTPHandler() http.Handler {
 		DisableLocalhostProtection: true,
 	})
 
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version")
