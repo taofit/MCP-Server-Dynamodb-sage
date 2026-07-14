@@ -3,6 +3,8 @@ set -euo pipefail
 
 DOMAIN="${1:?Usage: $0 yourdomain.com}"
 APP_NAME="dynamodb-sage"
+# Lightsail instance name — must match Terraform's `instance_name` variable.
+INSTANCE_NAME="${INSTANCE_NAME:-Ubuntu-1}"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TF_DIR="$DIR/terraform/lightsail"
 SSH_KEY="$DIR/keys/lightsail.pem"
@@ -11,9 +13,9 @@ DEPLOY_DIR="/tmp/${APP_NAME}-deploy"
 
 echo "=== Step 1: Get Lightsail IP ==="
 cd "$TF_DIR"
-IP="${LIGHTSAIL_IP:-$(aws lightsail get-instance --instance-name Ubuntu-1 --region eu-north-1 --query 'instance.publicIpAddress' --output text 2>/dev/null || true)}"
+IP="${LIGHTSAIL_IP:-$(aws lightsail get-instance --instance-name "$INSTANCE_NAME" --region eu-north-1 --query 'instance.publicIpAddress' --output text 2>/dev/null || true)}"
 if [ -z "$IP" ] || [ "$IP" = "None" ]; then
-  IP="${LIGHTSAIL_IP:-$(aws lightsail get-static-ips --region eu-north-1 --query 'staticIps[?attachedTo==`Ubuntu-1`].ipAddress' --output text 2>/dev/null || true)}"
+  IP="${LIGHTSAIL_IP:-$(aws lightsail get-static-ips --region eu-north-1 --query "staticIps[?attachedTo==\`$INSTANCE_NAME\`].ipAddress" --output text 2>/dev/null || true)}"
 fi
 if [ -z "$IP" ] || [ "$IP" = "None" ]; then
   IP=$(terraform output -raw static_ip 2>/dev/null || true)
