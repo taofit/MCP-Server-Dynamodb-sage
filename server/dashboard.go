@@ -307,27 +307,31 @@ func (srv *Server) generateChatResponse(ctx context.Context, messages []llm.Mess
 		if len(toolCalls) == 0 {
 			return nil
 		}
+
 		messages = append(messages, llm.Message{
-			Role:      "assistant",
+			Role:    "assistant",
 			ToolCalls: toolCalls,
 		})
-		toolResults := srv.processToolCalls(toolCalls)
+		toolResults := fetchToolResults(ctx, toolCalls, srv)
 		messages = append(messages, llm.Message{
-			Role:        "user",
+			Role:    "user",
 			ToolResults: toolResults,
 		})
 	}
 	return nil
 }
 
-func (srv *Server) processToolCalls(toolCalls []llm.ToolCall) []llm.ToolResult {
+func fetchToolResults(ctx context.Context, toolCalls []llm.ToolCall, srv *Server) []llm.ToolResult {
 	toolResults := make([]llm.ToolResult, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		result, err := srv.executeToolByName(srv.mcpCtx, tc.Name, tc.Arguments)
+		tOutput, err := srv.executeToolByName(ctx, tc.Name, tc.Arguments)
+		if err != nil {
+			tOutput = fmt.Sprintf("Error: %v", err)
+		}
 		toolResults = append(toolResults, llm.ToolResult{
 			ToolCallID:  tc.ID,
 			DisplayName: tc.Name,
-			Result:      result,
+			Result:      tOutput,
 			IsError:     err != nil,
 		})
 	}
