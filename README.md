@@ -168,6 +168,13 @@ terraform import aws_lightsail_instance.app Ubuntu-2
 terraform plan   # should report "No changes"
 ```
 
+> **`scripts/deploy.sh` picks up the new name automatically:** it resolves the
+> instance name from `terraform output -raw instance_name`, so after re-importing
+> you only update `terraform.tfvars` — no separate edit to the script is needed.
+> Override at runtime with `INSTANCE_NAME=... ./scripts/deploy.sh yourdomain.com`
+> when Terraform state isn't available.
+```
+
 > **Note on drift:** this Lightsail provider version does not support importing
 > `aws_lightsail_static_ip`, `aws_lightsail_static_ip_attachment`, or
 > `aws_lightsail_instance_public_ports`. Those resources (static IP, its
