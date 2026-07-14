@@ -393,8 +393,10 @@ func runGuardedTool[In any](srv *Server, ctx context.Context, name string, args 
 		return "", fmt.Errorf("invalid arguments for %s: %v", name, err)
 	}
 	req := &mcp.CallToolRequest{}
-	req.Params.Name = name
-	req.Params.Arguments = args
+	req.Params = &mcp.CallToolParamsRaw{
+		Name:      name,
+		Arguments: args,
+	}
 	wrapped := mcp.ToolHandlerFor[In, any](func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 		return call(ctx, req, &in)
 	})
