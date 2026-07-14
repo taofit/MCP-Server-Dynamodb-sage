@@ -171,7 +171,7 @@ terraform plan   # should report "No changes"
 > **`scripts/deploy.sh` picks up the new name automatically:** it resolves the
 > instance name from `terraform output -raw instance_name`, so after re-importing
 > you only update `terraform.tfvars` — no separate edit to the script is needed.
-> Override at runtime with `INSTANCE_NAME=... ./scripts/deploy.sh yourdomain.com`
+> Override at runtime with `INSTANCE_NAME=... ./scripts/deploy.sh dynamodb-sage.yourdomain.com`
 > when Terraform state isn't available.
 ```
 

@@ -307,27 +307,31 @@ func (srv *Server) generateChatResponse(ctx context.Context, messages []llm.Mess
 		if len(toolCalls) == 0 {
 			return nil
 		}
+
 		messages = append(messages, llm.Message{
-			Role:      "assistant",
+			Role:    "assistant",
 			ToolCalls: toolCalls,
 		})
-		toolResults := srv.processToolCalls(toolCalls)
+		toolResults := fetchToolResults(ctx, toolCalls, srv)
 		messages = append(messages, llm.Message{
-			Role:        "user",
+			Role:    "user",
 			ToolResults: toolResults,
 		})
 	}
 	return nil
 }
 
-func (srv *Server) processToolCalls(toolCalls []llm.ToolCall) []llm.ToolResult {
+func fetchToolResults(ctx context.Context, toolCalls []llm.ToolCall, srv *Server) []llm.ToolResult {
 	toolResults := make([]llm.ToolResult, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		result, err := srv.executeToolByName(srv.mcpCtx, tc.Name, tc.Arguments)
+		tOutput, err := srv.executeToolByName(ctx, tc.Name, tc.Arguments)
+		if err != nil {
+			tOutput = fmt.Sprintf("Error: %v", err)
+		}
 		toolResults = append(toolResults, llm.ToolResult{
 			ToolCallID:  tc.ID,
 			DisplayName: tc.Name,
-			Result:      result,
+			Result:      tOutput,
 			IsError:     err != nil,
 		})
 	}
@@ -338,130 +342,70 @@ func (srv *Server) executeToolByName(ctx context.Context, name string, args json
 	if args == nil {
 		args = json.RawMessage("{}")
 	}
-	req := &mcp.CallToolRequest{}
+
+	// Route chat/agentic tool calls through the same guardrail + risk-analysis
+	// pipeline as the MCP path (instrumentMCP + withRiskAnalysis). Mutating and
+	// heavy ops are risk-analyzed; read-only ops are instrumented only. This
+	// makes the Claude-driven path go through the guardrail just like MCP.
 	switch name {
 	case "list_tables":
-		var a ListTablesArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for list_tables: %v", err)
-		}
-		result, _, err := srv.listTables(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, false, srv.listTables)
 	case "describe_table":
-		var a DescribeTableArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for describe_table: %v", err)
-		}
-		result, _, err := srv.describeTable(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, false, srv.describeTable)
 	case "scan_table":
-		var a ScanTableArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for scan_table: %v", err)
-		}
-		result, _, err := srv.scanTable(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.scanTable)
 	case "query_table":
-		var a QueryTableArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for query_table: %v", err)
-		}
-		result, _, err := srv.queryTable(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, false, srv.queryTable)
 	case "put_item":
-		var a PutItemArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for put_item: %v", err)
-		}
-		result, _, err := srv.putItem(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.putItem)
 	case "get_item":
-		var a GetItemArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for get_item: %v", err)
-		}
-		result, _, err := srv.getItem(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, false, srv.getItem)
 	case "update_item":
-		var a UpdateItemArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for update_item: %v", err)
-		}
-		result, _, err := srv.updateItem(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.updateItem)
 	case "delete_item":
-		var a DeleteItemArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for delete_item: %v", err)
-		}
-		result, _, err := srv.deleteItem(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.deleteItem)
 	case "batch_get_items":
-		var a BatchGetItemArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for batch_get_items: %v", err)
-		}
-		result, _, err := srv.batchGetItems(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.batchGetItems)
 	case "batch_put_items":
-		var a BatchPutItemsArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for batch_put_items: %v", err)
-		}
-		result, _, err := srv.batchPutItems(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.batchPutItems)
 	case "batch_delete_items":
-		var a BatchDeleteItemsArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for batch_delete_items: %v", err)
-		}
-		result, _, err := srv.batchDeleteItems(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.batchDeleteItems)
 	case "create_optimized_table":
-		var a CreateOptimizedTableArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for create_optimized_table: %v", err)
-		}
-		result, _, err := srv.createOptimizedTable(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.createOptimizedTable)
 	case "delete_table":
-		var a DeleteTableArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for delete_table: %v", err)
-		}
-		result, _, err := srv.deleteTable(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.deleteTable)
 	case "update_table":
-		var a UpdateTableArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for update_table: %v", err)
-		}
-		result, _, err := srv.updateTable(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, true, srv.updateTable)
 	case "update_table_ttl":
-		var a UpdateTableTTLArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for update_table_ttl: %v", err)
-		}
-		result, _, err := srv.updateTableTTL(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, false, srv.updateTableTTL)
 	case "read_audit_logs":
-		var a ReadAuditLogsArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for read_audit_logs: %v", err)
-		}
-		result, _, err := srv.readAuditLogs(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, false, srv.readAuditLogs)
 	case "get_job_result":
-		var a GetJobResultArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("Invalid arguments for get_job_result: %v", err)
-		}
-		result, _, err := srv.getJobResult(ctx, req, &a)
-		return srv.formatToolResult(result, err), nil
+		return runGuardedTool(srv,ctx, name, args, false, srv.getJobResult)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+func runGuardedTool[In any](srv *Server, ctx context.Context, name string, args json.RawMessage, risk bool, call func(ctx context.Context, req *mcp.CallToolRequest, input *In) (*mcp.CallToolResult, any, error)) (string, error) {
+	var input In
+	if err := json.Unmarshal(args, &input); err != nil {
+		return "", fmt.Errorf("invalid arguments for %s: %v", name, err)
+	}
+	req := &mcp.CallToolRequest{}
+	req.Params = &mcp.CallToolParamsRaw{
+		Name:      name,
+		Arguments: args,
+	}
+	wrapped := mcp.ToolHandlerFor[In, any](func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		return call(ctx, req, &in)
+	})
+	var h mcp.ToolHandlerFor[In, any] = wrapped
+	if risk {
+		h = withRiskAnalysis(srv, wrapped)
+	}
+	result, _, err := instrumentMCP(srv, name, h)(ctx, req, input)
+	return srv.formatToolResult(result, err), nil
 }
 
 func (srv *Server) formatToolResult(result *mcp.CallToolResult, err error) string {

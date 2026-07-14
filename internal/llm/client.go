@@ -95,27 +95,39 @@ func constructMessages(messages []Message) []anthropic.MessageParam {
 	for _, message := range messages {
 		switch {
 		case message.Role == "assistant" && len(message.ToolCalls) > 0:
-			blocks := make([]anthropic.ContentBlockParamUnion, 0, len(message.ToolCalls))
+			capacity := len(message.ToolCalls)
+			if strings.TrimSpace(message.Content) != "" {
+				capacity++
+			}
+			content := make([]anthropic.ContentBlockParamUnion, 0, capacity)
 			for _, tc := range message.ToolCalls {
-				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, tc.Arguments, tc.Name))
+				b := anthropic.NewToolUseBlock(tc.ID, tc.Arguments, tc.Name)
+				content = append(content, b)
 			}
 			if strings.TrimSpace(message.Content) != "" {
-				blocks = append(blocks, anthropic.NewTextBlock(message.Content))
+				content = append(content, anthropic.NewTextBlock(message.Content))
 			}
-			result = append(result, anthropic.NewAssistantMessage(blocks...))
-
+			result = append(result, anthropic.NewAssistantMessage(content...))
 		case message.Role == "user" && len(message.ToolResults) > 0:
-			blocks := make([]anthropic.ContentBlockParamUnion, 0, len(message.ToolResults))
-			for _, tr := range message.ToolResults {
-				blocks = append(blocks, anthropic.NewToolResultBlock(tr.ToolCallID, tr.Result, tr.IsError))
+			capacity := len(message.ToolResults)
+			if strings.TrimSpace(message.Content) != "" {
+				capacity++
 			}
-			result = append(result, anthropic.NewUserMessage(blocks...))
-
+			content := make([]anthropic.ContentBlockParamUnion, 0, capacity)
+			for _, tr := range message.ToolResults {
+				b := anthropic.NewToolResultBlock(tr.ToolCallID, tr.Result, tr.IsError)
+				content = append(content, b)
+			}
+			result = append(result, anthropic.NewUserMessage(content...))
 		case strings.TrimSpace(message.Content) != "":
-			if message.Role == "assistant" {
-				result = append(result, anthropic.NewAssistantMessage(anthropic.NewTextBlock(message.Content)))
-			} else {
-				result = append(result, anthropic.NewUserMessage(anthropic.NewTextBlock(message.Content)))
+			content := anthropic.NewTextBlock(message.Content)
+			switch message.Role {
+			case "assistant":
+				result = append(result, anthropic.NewAssistantMessage(content))
+			case "user":
+				result = append(result, anthropic.NewUserMessage(content))
+			default:
+				result = append(result, anthropic.NewUserMessage(content))
 			}
 		}
 	}
