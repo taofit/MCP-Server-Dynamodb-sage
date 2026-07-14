@@ -45,6 +45,7 @@ internal/risk/analyzer.go
 terraform/**/.terraform/
 terraform/**/terraform.tfstate
 terraform/**/terraform.tfstate.backup
+terraform/**/terraform.tfstate.*.backup
 
 # Lightsail SSH keys
 keys/
