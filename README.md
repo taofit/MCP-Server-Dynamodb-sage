@@ -171,7 +171,7 @@ terraform plan   # should report "No changes"
 > **`scripts/deploy.sh` picks up the new name automatically:** it resolves the
 > instance name from `terraform output -raw instance_name`, so after re-importing
 > you only update `terraform.tfvars` — no separate edit to the script is needed.
-> Override at runtime with `INSTANCE_NAME=... ./scripts/deploy.sh dynamodb-sage.hzcentre.com`
+> Override at runtime with `INSTANCE_NAME=... ./scripts/deploy.sh dynamodb-sage.yourdomain.com`
 > when Terraform state isn't available.
 ```
 
@@ -186,7 +186,7 @@ terraform plan   # should report "No changes"
 ### Deploy the app
 
 ```bash
-./scripts/deploy.sh dynamodb-sage.hzcentre.com
+./scripts/deploy.sh dynamodb-sage.yourdomain.com
 ```
 
 The script:
@@ -221,13 +221,13 @@ ssh -i keys/lightsail.pem ubuntu@<IP> "cd /opt/dynamodb-sage && sudo docker comp
 ### Verify
 
 ```bash
-curl https://dynamodb-sage.hzcentre.com/health
+curl https://dynamodb-sage.yourdomain.com/health
 # → ok
 ```
 
 ### Access the Dashboard
 
-Open `https://dynamodb-sage.hzcentre.com/` in a browser. The dashboard is served from the same Go binary — no separate deployment needed.
+Open `https://dynamodb-sage.yourdomain.com/` in a browser. The dashboard is served from the same Go binary — no separate deployment needed.
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -279,7 +279,7 @@ No tags → falls back to commit hash → `"dev"`. Set `VERSION=...` env var to 
 ### Redeploy after code changes
 
 ```bash
-./scripts/deploy.sh dynamodb-sage.hzcentre.com
+./scripts/deploy.sh dynamodb-sage.yourdomain.com
 ```
 
 The script skips nginx/certbot setup on subsequent runs.
@@ -333,7 +333,7 @@ terraform apply
     },
     "dynamo-sage-aws": {
       "type": "remote",
-      "url": "https://dynamodb-sage.hzcentre.com",
+      "url": "https://dynamodb-sage.yourdomain.com",
       "enabled": true
     }
   }
@@ -362,7 +362,7 @@ terraform apply
   "mcpServers": {
     "dynamodb-sage-aws": {
       "command": "npx",
-      "args": ["-y", "supergateway", "--streamableHttp", "https://dynamodb-sage.hzcentre.com", "--streamableHttpPath", "/"]
+      "args": ["-y", "supergateway", "--streamableHttp", "https://dynamodb-sage.yourdomain.com", "--streamableHttpPath", "/"]
     }
   }
 }
