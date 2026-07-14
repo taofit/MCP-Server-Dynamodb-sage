@@ -13,7 +13,13 @@ variable "aws_region" {
 variable "instance_plan" {
   description = "Lightsail plan (bundle ID)"
   type        = string
-  default     = "nano_3_0"
+  default     = "micro_3_0"
+}
+
+variable "instance_name" {
+  description = "Name of the Lightsail instance. Lightsail instance names are immutable, so this must match the remote instance. If the remote instance is created/recreated with a different name, re-adopt it with: terraform import aws_lightsail_instance.app <new-name>"
+  type        = string
+  default     = "Ubuntu-1"
 }
 
 variable "ssh_key_name" {

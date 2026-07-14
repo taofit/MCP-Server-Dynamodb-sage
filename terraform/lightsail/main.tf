@@ -43,11 +43,11 @@ resource "local_sensitive_file" "private_key" {
 # Lightsail instance
 # ------------------------------------------------------------------------------
 resource "aws_lightsail_instance" "app" {
-  name              = var.project_name
+  name              = var.instance_name
   availability_zone = "${var.aws_region}a"
   blueprint_id      = "ubuntu_22_04"
   bundle_id         = var.instance_plan
-  key_pair_name     = aws_lightsail_key_pair.main.name
+  key_pair_name     = "LightsailDefaultKeyPair"
   depends_on        = [aws_iam_access_key.lightsail]
 
 
@@ -76,48 +76,20 @@ EOF
   tags = {
     Name = var.project_name
   }
+
+  lifecycle {
+    ignore_changes = [user_data]
+  }
 }
 
 
 # ------------------------------------------------------------------------------
-# Static IP
+# NOTE: The static IP (StaticIp-1), its attachment to instance "Ubuntu-1", and
+# the instance firewall (ports 22/80/443) are managed manually outside of
+# Terraform. The AWS provider for this Lightsail version does not support
+# importing these resources, so they are intentionally excluded from config to
+# keep `terraform plan` free of destructive recreate actions.
 # ------------------------------------------------------------------------------
-resource "aws_lightsail_static_ip" "app" {
-  name = "${var.project_name}-ip"
-}
-
-resource "aws_lightsail_static_ip_attachment" "app" {
-  static_ip_name = aws_lightsail_static_ip.app.name
-  instance_name  = aws_lightsail_instance.app.name
-}
-
-# ------------------------------------------------------------------------------
-# Firewall: open ports needed for the MCP server
-# ------------------------------------------------------------------------------
-resource "aws_lightsail_instance_public_ports" "app" {
-  instance_name = aws_lightsail_instance.app.name
-
-  port_info {
-    from_port = 80
-    to_port   = 80
-    protocol  = "tcp"
-  }
-  port_info {
-    from_port = 443
-    to_port   = 443
-    protocol  = "tcp"
-  }
-  port_info {
-    from_port = 22
-    to_port   = 22
-    protocol  = "tcp"
-  }
-  port_info {
-    from_port = 2112
-    to_port   = 2112
-    protocol  = "tcp"
-  }
-}
 
 # ------------------------------------------------------------------------------
 # IAM user for Lightsail DynamoDB access

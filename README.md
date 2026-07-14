@@ -137,7 +137,51 @@ This creates:
 - SSH key (`keys/lightsail.pem`)
 - IAM user with `AmazonDynamoDBFullAccess` + `AmazonSSMReadOnlyAccess` (`keys/lightsail-credentials.ini`)
 - SSM parameter `/dynamodb-sage/claude/api-key` (empty placeholder — fill via AWS Console after deploy)
-- Firewall rules (ports 22, 80, 443)
+  - Firewall rules (ports 22, 80, 443)
+
+### Instance name & Terraform state
+
+The Lightsail instance is created with the `instance_name` variable (default
+`Ubuntu-1`). **Lightsail instance names are immutable**, so the name in
+Terraform must always match the name of the actual instance in AWS — Terraform
+cannot rename a remote instance, and changing `instance_name` would force a
+destructive destroy/recreate.
+
+```hcl
+# terraform.tfvars
+instance_name  = "Ubuntu-1"   # must match the real Lightsail instance
+instance_plan = "micro_3_0"   # 2 vCPU / 1 GiB RAM
+```
+
+If the remote instance is ever created or recreated with a **different** name
+(e.g. `Ubuntu-2`), re-adopt it without destroying anything — a one-time import,
+then set the variable to match:
+
+```bash
+cd terraform/lightsail
+# 1. Drop the stale state entry if it still points at the old name
+terraform state rm aws_lightsail_instance.app
+# 2. Adopt the existing instance (no create/destroy)
+terraform import aws_lightsail_instance.app Ubuntu-2
+# 3. Set instance_name = "Ubuntu-2" in terraform.tfvars
+# 4. Confirm clean
+terraform plan   # should report "No changes"
+```
+
+> **`scripts/deploy.sh` picks up the new name automatically:** it resolves the
+> instance name from `terraform output -raw instance_name`, so after re-importing
+> you only update `terraform.tfvars` — no separate edit to the script is needed.
+> Override at runtime with `INSTANCE_NAME=... ./scripts/deploy.sh yourdomain.com`
+> when Terraform state isn't available.
+```
+
+> **Note on drift:** this Lightsail provider version does not support importing
+> `aws_lightsail_static_ip`, `aws_lightsail_static_ip_attachment`, or
+> `aws_lightsail_instance_public_ports`. Those resources (static IP, its
+> attachment to the instance, and the firewall ports) are therefore managed
+> manually outside of Terraform and are intentionally excluded from the
+> configuration to keep `terraform plan` free of destructive recreate actions.
+> The instance, IAM user, SSH key pair, and SSM parameter remain Terraform-managed.
 
 ### Deploy the app
 

@@ -1,6 +1,6 @@
 output "static_ip" {
-  description = "Static IP address for the Lightsail instance"
-  value       = aws_lightsail_static_ip.app.ip_address
+  description = "Public IP address for the Lightsail instance"
+  value       = aws_lightsail_instance.app.public_ip_address
 }
 
 output "ssh_user" {
@@ -20,7 +20,7 @@ output "instance_name" {
 
 output "connect_command" {
   description = "Command to SSH into the instance"
-  value       = "ssh -i ${abspath("${path.module}/../../keys/lightsail.pem")} ubuntu@${aws_lightsail_static_ip.app.ip_address}"
+  value       = "ssh -i ${abspath("${path.module}/../../keys/lightsail.pem")} ubuntu@${aws_lightsail_instance.app.public_ip_address}"
 }
 
 output "aws_access_key_id" {

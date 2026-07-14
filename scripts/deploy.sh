@@ -11,9 +11,21 @@ DEPLOY_DIR="/tmp/${APP_NAME}-deploy"
 
 echo "=== Step 1: Get Lightsail IP ==="
 cd "$TF_DIR"
-IP="${LIGHTSAIL_IP:-$(aws lightsail get-instance --instance-name Ubuntu-1 --region eu-north-1 --query 'instance.publicIpAddress' --output text 2>/dev/null || true)}"
+
+# Resolve the Lightsail instance name. Single source of truth = Terraform state
+# (terraform output -raw instance_name). Override via $INSTANCE_NAME env var if
+# needed; fall back to Ubuntu-1 when Terraform state isn't available.
+if [ -z "${INSTANCE_NAME:-}" ]; then
+  INSTANCE_NAME="$(terraform output -raw instance_name 2>/dev/null || true)"
+  if [ -z "$INSTANCE_NAME" ]; then
+    INSTANCE_NAME="Ubuntu-1"
+  fi
+fi
+echo "  Instance: $INSTANCE_NAME"
+
+IP="${LIGHTSAIL_IP:-$(aws lightsail get-instance --instance-name "$INSTANCE_NAME" --region eu-north-1 --query 'instance.publicIpAddress' --output text 2>/dev/null || true)}"
 if [ -z "$IP" ] || [ "$IP" = "None" ]; then
-  IP="${LIGHTSAIL_IP:-$(aws lightsail get-static-ips --region eu-north-1 --query 'staticIps[?attachedTo==`Ubuntu-1`].ipAddress' --output text 2>/dev/null || true)}"
+  IP="${LIGHTSAIL_IP:-$(aws lightsail get-static-ips --region eu-north-1 --query "staticIps[?attachedTo==\`$INSTANCE_NAME\`].ipAddress" --output text 2>/dev/null || true)}"
 fi
 if [ -z "$IP" ] || [ "$IP" = "None" ]; then
   IP=$(terraform output -raw static_ip 2>/dev/null || true)
