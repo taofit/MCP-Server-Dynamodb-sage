@@ -26,7 +26,7 @@ type SessionProvider interface {
 
 type NotificationService struct {
 	kafkaClient       KafkaClient
-	notificationTopic string
+	notificationsTopic string
 	sessProvider      SessionProvider
 }
 
@@ -51,11 +51,11 @@ type NotificationPayload struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-func NewNotificationService(kafkaClient KafkaClient, notificationTopic string, sp SessionProvider) *NotificationService {
+func NewNotificationService(kafkaClient KafkaClient, notificationsTopic string, sp SessionProvider) *NotificationService {
 	return &NotificationService{
-		kafkaClient:       kafkaClient,
-		notificationTopic: notificationTopic,
-		sessProvider:      sp,
+		kafkaClient:        kafkaClient,
+		notificationsTopic: notificationsTopic,
+		sessProvider:       sp,
 	}
 }
 
@@ -78,7 +78,7 @@ func (ntf *NotificationService) SendNotification(tableName, status, operation, i
 		Timestamp: time.Now().Unix(),
 	}
 	data, _ := json.Marshal(notification)
-	if err := ntf.kafkaClient.Send(ntf.notificationTopic, id, data); err != nil {
+	if err := ntf.kafkaClient.Send(ntf.notificationsTopic, id, data); err != nil {
 		log.Printf("Failed to send notification: %v", err)
 	}
 }

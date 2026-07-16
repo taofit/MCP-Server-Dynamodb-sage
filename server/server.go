@@ -230,7 +230,24 @@ func (srv *Server) HTTPHandler() http.Handler {
 				json.NewEncoder(w).Encode(srv.toolList)
 				return
 			}
-
+			if strings.HasPrefix(r.URL.Path, "/api/tables/") {
+				if strings.HasSuffix(r.URL.Path, "/items") {
+					srv.getTableItems(w, r)
+					return
+				}
+				srv.getTableInfo(w, r)
+				return
+			}
+			if r.URL.Path == "/api/tables" {
+				tables, err := srv.listTablesInfo()
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(tables)
+				return
+			}
 			// SPA routes: try to serve the file, fall back to index.html for client-side routing
 			staticFS, err := fs.Sub(dashboardFS, "static")
 			if err == nil {

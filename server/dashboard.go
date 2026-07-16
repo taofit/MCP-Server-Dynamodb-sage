@@ -7,15 +7,19 @@ import (
 	"dynamodb-sage/internal/notification"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -26,6 +30,13 @@ type chatRequest struct {
 
 type chatResponse struct {
 	Response string `json:"response"`
+}
+
+type tableInfo struct {
+	TableName  string `json:"tableName"`
+	ItemCount  int64  `json:"itemCount"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	Status     string `json:"status"`
 }
 
 const historyLimit = 10
@@ -216,86 +227,6 @@ func (srv *Server) buildChatHistory(msg string) []llm.Message {
 	}
 	return llmMessages
 }
-
-/*func (srv *Server) generateChatResponse_back(msg string) string {
-	lower := strings.ToLower(msg)
-
-	switch {
-	case lower == "/help" || lower == "/tools" || lower == "help" || lower == "what can you do":
-		return srv.formatToolList()
-
-	case strings.Contains(lower, "table") && strings.Contains(lower, "list"):
-		return "Use **list_tables** in the Tools tab to list all your DynamoDB tables.\n\nSwitch to the **Tools** tab, select `list_tables`, and click Send (no arguments needed)."
-
-	case strings.Contains(lower, "table") && (strings.Contains(lower, "describe") || strings.Contains(lower, "info")):
-		return "Use **describe_table** in the Tools tab to get details about a specific table.\n\nExample arguments:\n```json\n{\"tableName\": \"your-table-name\"}\n```"
-
-	case strings.Contains(lower, "table") && (strings.Contains(lower, "create") || strings.Contains(lower, "new")):
-		return "Use **create_optimized_table** in the Tools tab to create a new DynamoDB table.\n\nIt supports GSIs, LSIs, tags, and provisioned or on-demand billing."
-
-	case strings.Contains(lower, "table") && (strings.Contains(lower, "delete") || strings.Contains(lower, "remove")):
-		return "Use **delete_table** in the Tools tab to delete a table.\n\n**Warning:** Deleting a table is irreversible. Make sure you have backups!"
-
-	case strings.Contains(lower, "item") && (strings.Contains(lower, "get") || strings.Contains(lower, "find") || strings.Contains(lower, "read")):
-		return "Use **get_item** in the Tools tab to retrieve an item by its primary key, or **query_table** for more complex lookups."
-
-	case strings.Contains(lower, "item") && (strings.Contains(lower, "put") || strings.Contains(lower, "add") || strings.Contains(lower, "insert") || strings.Contains(lower, "create")):
-		return "Use **put_item** in the Tools tab to insert or overwrite an item.\n\nFor multiple items, use **batch_put_items**."
-
-	case strings.Contains(lower, "item") && (strings.Contains(lower, "update") || strings.Contains(lower, "change")):
-		return "Use **update_item** in the Tools tab to modify an existing item.\n\nYou'll need the table name, key, and an update expression."
-
-	case strings.Contains(lower, "item") && (strings.Contains(lower, "delete") || strings.Contains(lower, "remove")):
-		return "Use **delete_item** in the Tools tab to remove an item by its primary key."
-
-	case strings.Contains(lower, "scan"):
-		return "Use **scan_table** in the Tools tab.\n\n⚠️ **Scanning is expensive** – it reads the entire table. Prefer **query_table** when you know the partition key."
-
-	case strings.Contains(lower, "query"):
-		return "Use **query_table** in the Tools tab.\n\nYou need:\n- `tableName` (required)\n- `keyConditionExpression` (required, e.g. `#pk = :pkVal`)\n- `expressionAttributeValues` (required)\n- `expressionAttributeNames` (optional but recommended)"
-
-	case strings.Contains(lower, "audit") || strings.Contains(lower, "log"):
-		return "Use **read_audit_logs** in the Tools tab to see recent DynamoDB operations with timestamps, tables, and capacity consumed."
-
-	case strings.Contains(lower, "job") || strings.Contains(lower, "async"):
-		return "Use **get_job_result** in the Tools tab to check the status of async operations (table creation, batch operations)."
-
-	case strings.Contains(lower, "ttl") || strings.Contains(lower, "time to live"):
-		return "Use **update_table_ttl** in the Tools tab to enable or disable TTL on a table."
-	default:
-		if srv.rateLimiter != nil && !srv.rateLimiter.Allow() {
-			log.Printf("LLM rate limit reached")
-			return "LLM temporarily unavailable due to rate limiting - please try again later or use tools instead:\n\n" + srv.formatToolList()
-		}
-
-		// Retrieve last 10 messages from store (includes the user message just added in handleChat)
-		storedChatHistory, err := srv.store.GetChatHistory(historyLimit)
-		var llmMessages []llm.Message
-		if err == nil && len(storedChatHistory) > 0 {
-			// Reverse history to keep chronological order
-			for i := len(storedChatHistory) - 1; i >= 0; i-- {
-				llmMessages = append(llmMessages, llm.Message{
-					Role:    storedChatHistory[i].User,
-					Content: storedChatHistory[i].Content,
-				})
-			}
-		} else {
-			// Fallback to just the current message if retrieving history fails
-			llmMessages = []llm.Message{
-				{Role: "user", Content: msg},
-			}
-		}
-		tokenChan := make(chan string)
-
-		err = srv.generateChatResponse(srv.mcpCtx, llmMessages, tokenChan)
-		if err != nil {
-			log.Printf("LLM error: %v", err)
-			return "LLM temporarily unavailable - use tools instead or /help for commands"
-		}
-		return "resp"
-	}
-}
-*/
 
 func (srv *Server) formatToolList() string {
 	var b strings.Builder
@@ -514,4 +445,321 @@ func (srv *Server) countTables() (int, error) {
 		return 0, err
 	}
 	return len(tableOutput.TableNames), nil
+}
+
+func (srv *Server) listTablesInfo() ([]tableInfo, error) {
+	tableNames, err := srv.fetchTableNames()
+	if err != nil {
+		return nil, err
+	}
+	tableInfos := []tableInfo{}
+	total := 100
+	if len(tableNames) < total {
+		total = len(tableNames)
+	}
+	for i := 0; i < total; i++ {
+		tableInfo, err := srv.getTableMetadata(tableNames[i])
+		if err != nil {
+			return nil, err
+		}
+		tableInfos = append(tableInfos, tableInfo)
+	}
+	return tableInfos, nil
+}
+
+func (srv *Server) fetchTableNames() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tableOutput, err := srv.db.ListTables(ctx, &dynamodb.ListTablesInput{})
+	if err != nil {
+		return nil, err
+	}
+	return tableOutput.TableNames, nil
+}
+
+func (srv *Server) getTableMetadata(tableName string) (tableInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	describeOutput, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+		TableName: &tableName,
+	})
+	if err != nil {
+		return tableInfo{}, err
+	}
+	tableInfo := tableInfo{
+		TableName: *describeOutput.Table.TableName,
+		ItemCount: *describeOutput.Table.ItemCount,
+		SizeBytes: *describeOutput.Table.TableSizeBytes,
+		Status:    string(describeOutput.Table.TableStatus),
+	}
+	return tableInfo, nil
+}
+
+type TableDescription struct {
+	TableName            string                 `json:"tableName"`
+	Status               string                 `json:"status"`
+	KeySchema            []KeySchemaEntry       `json:"keySchema"`
+	AttributeDefinitions []AttributeDefinitionDB `json:"attributeDefinitions"`
+	ItemCount            int64                  `json:"itemCount"`
+	SizeBytes            int64                  `json:"sizeBytes"`
+	Throughput           *ThroughputInfo        `json:"throughput,omitempty"`
+	BillingMode          string                 `json:"billingMode,omitempty"`
+	GSIs                 []GSIInfo              `json:"gsis"`
+	LSIs                 []GSIInfo              `json:"lsis"`
+	TTLAttribute         string                 `json:"ttlAttribute,omitempty"`
+	TTLEnabled           bool                   `json:"ttlEnabled"`
+}
+
+type KeySchemaEntry struct {
+	AttributeName string `json:"attributeName"`
+	KeyType       string `json:"keyType"`
+}
+
+type AttributeDefinitionDB struct {
+	AttributeName string `json:"attributeName"`
+	AttributeType string `json:"attributeType"`
+}
+
+type ThroughputInfo struct {
+	ReadCapacityUnits  int64 `json:"readCapacityUnits"`
+	WriteCapacityUnits int64 `json:"writeCapacityUnits"`
+}
+
+type GSIInfo struct {
+	IndexName  string           `json:"indexName"`
+	KeySchema  []KeySchemaEntry `json:"keySchema"`
+	Projection *ProjectionInfo  `json:"projection,omitempty"`
+	ItemCount  int64            `json:"itemCount"`
+	SizeBytes  int64            `json:"sizeBytes"`
+}
+
+type ProjectionInfo struct {
+	ProjectionType string `json:"projectionType"`
+}
+
+type secondaryIndex struct {
+	IndexName      *string
+	KeySchema      []types.KeySchemaElement
+	Projection     *types.Projection
+	ItemCount      *int64
+	IndexSizeBytes *int64
+}
+
+// getTableInfo handles GET /api/tables/{tableName}
+func (srv *Server) getTableInfo(w http.ResponseWriter, r *http.Request) {
+	// Extract the tableName. Path starts with /api/tables/
+	tableName := strings.TrimPrefix(r.URL.Path, "/api/tables/")
+	if tableName == "" {
+		http.Error(w, "missing table name", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. Fetch table description from DynamoDB
+	describeOutput, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+		TableName: &tableName,
+	})
+	if err != nil {
+		var rnfe *types.ResourceNotFoundException
+		if errors.As(err, &rnfe) {
+			http.Error(w, "table not found", http.StatusNotFound)
+			return
+		}
+
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Fetch TTL details
+	var ttlAttr string
+	var ttlEnabled bool
+	ttlOutput, err := srv.db.DescribeTimeToLive(ctx, &dynamodb.DescribeTimeToLiveInput{
+		TableName: &tableName,
+	})
+	if err == nil && ttlOutput != nil && ttlOutput.TimeToLiveDescription != nil {
+		if ttlOutput.TimeToLiveDescription.TimeToLiveStatus == types.TimeToLiveStatusEnabled {
+			ttlEnabled = true
+		}
+		if ttlOutput.TimeToLiveDescription.AttributeName != nil {
+			ttlAttr = *ttlOutput.TimeToLiveDescription.AttributeName
+		}
+	}
+
+	// Map Key Schema
+	keySchema := []KeySchemaEntry{}
+	for _, k := range describeOutput.Table.KeySchema {
+		keySchema = append(keySchema, KeySchemaEntry{
+			AttributeName: *k.AttributeName,
+			KeyType:       string(k.KeyType),
+		})
+	}
+
+	// Map Attribute Definitions
+	attrDefs := []AttributeDefinitionDB{}
+	for _, a := range describeOutput.Table.AttributeDefinitions {
+		attrDefs = append(attrDefs, AttributeDefinitionDB{
+			AttributeName: *a.AttributeName,
+			AttributeType: string(a.AttributeType),
+		})
+	}
+
+	// Map GSIs
+	gsis := []GSIInfo{}
+	if describeOutput.Table.GlobalSecondaryIndexes != nil {
+		for _, g := range describeOutput.Table.GlobalSecondaryIndexes {
+			gsis = getSecondIndex(g, gsis)
+		}
+	}
+
+	// Map LSIs
+	lsis := []GSIInfo{}
+	if describeOutput.Table.LocalSecondaryIndexes != nil {
+		for _, l := range describeOutput.Table.LocalSecondaryIndexes {
+			lsis = getSecondIndex(l, lsis)
+		}
+	}
+
+	// Throughput
+	var throughput *ThroughputInfo
+	if describeOutput.Table.ProvisionedThroughput != nil {
+		var readCap, writeCap int64
+		if describeOutput.Table.ProvisionedThroughput.ReadCapacityUnits != nil {
+			readCap = *describeOutput.Table.ProvisionedThroughput.ReadCapacityUnits
+		}
+		if describeOutput.Table.ProvisionedThroughput.WriteCapacityUnits != nil {
+			writeCap = *describeOutput.Table.ProvisionedThroughput.WriteCapacityUnits
+		}
+		throughput = &ThroughputInfo{
+			ReadCapacityUnits:  readCap,
+			WriteCapacityUnits: writeCap,
+		}
+	}
+
+	// Billing mode
+	var billingMode string
+	if describeOutput.Table.BillingModeSummary != nil {
+		billingMode = string(describeOutput.Table.BillingModeSummary.BillingMode)
+	} else if describeOutput.Table.ProvisionedThroughput != nil {
+		billingMode = "PROVISIONED"
+	}
+
+	var tableItemCount int64
+	if describeOutput.Table.ItemCount != nil {
+		tableItemCount = *describeOutput.Table.ItemCount
+	}
+	var tableSizeBytes int64
+	if describeOutput.Table.TableSizeBytes != nil {
+		tableSizeBytes = *describeOutput.Table.TableSizeBytes
+	}
+
+	desc := TableDescription{
+		TableName:            *describeOutput.Table.TableName,
+		Status:               string(describeOutput.Table.TableStatus),
+		KeySchema:            keySchema,
+		AttributeDefinitions: attrDefs,
+		ItemCount:            tableItemCount,
+		SizeBytes:            tableSizeBytes,
+		Throughput:           throughput,
+		BillingMode:          billingMode,
+		GSIs:                 gsis,
+		LSIs:                 lsis,
+		TTLAttribute:         ttlAttr,
+		TTLEnabled:           ttlEnabled,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(desc)
+}
+
+func toSecondaryIndex(v any) secondaryIndex {
+	switch i := v.(type) {
+	case types.GlobalSecondaryIndexDescription:
+		return secondaryIndex{i.IndexName, i.KeySchema, i.Projection, i.ItemCount, i.IndexSizeBytes}
+	case types.LocalSecondaryIndexDescription:
+		return secondaryIndex{i.IndexName, i.KeySchema, i.Projection, i.ItemCount, i.IndexSizeBytes}
+	}
+	return secondaryIndex{}
+}
+
+func getSecondIndex(v any, lsis []GSIInfo) []GSIInfo {
+	l := toSecondaryIndex(v)
+	lsiKeys := []KeySchemaEntry{}
+	for _, k := range l.KeySchema {
+		lsiKeys = append(lsiKeys, KeySchemaEntry{
+			AttributeName: *k.AttributeName,
+			KeyType:       string(k.KeyType),
+		})
+	}
+	var proj *ProjectionInfo
+	if l.Projection != nil {
+		proj = &ProjectionInfo{
+			ProjectionType: string(l.Projection.ProjectionType),
+		}
+	}
+	var itemCount int64
+	if l.ItemCount != nil {
+		itemCount = *l.ItemCount
+	}
+	var sizeBytes int64
+	if l.IndexSizeBytes != nil {
+		sizeBytes = *l.IndexSizeBytes
+	}
+	lsis = append(lsis, GSIInfo{
+		IndexName:  *l.IndexName,
+		KeySchema:  lsiKeys,
+		Projection: proj,
+		ItemCount:  itemCount,
+		SizeBytes:  sizeBytes,
+	})
+	return lsis
+}
+
+// getTableItems handles GET /api/tables/{tableName}/items
+func (srv *Server) getTableItems(w http.ResponseWriter, r *http.Request) {
+	// Extract table name: URL Path is "/api/tables/{tableName}/items"
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/tables/")
+	tableName := strings.TrimSuffix(trimmed, "/items")
+
+	if tableName == "" {
+		http.Error(w, "missing table name", http.StatusBadRequest)
+		return
+	}
+
+	limit := 20
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if val, err := strconv.Atoi(limitStr); err == nil && val > 0 {
+			limit = val
+		}
+	}
+
+	if limit > 100 {
+		limit = 100
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	limit32 := int32(limit)
+	scanOutput, err := srv.db.Scan(ctx, &dynamodb.ScanInput{
+		TableName: &tableName,
+		Limit:     &limit32,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	items := []map[string]any{}
+	err = attributevalue.UnmarshalListOfMaps(scanOutput.Items, &items)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	scrubbedItems := srv.guardrail.ScrubItems("scan_table", tableName, items)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(scrubbedItems)
 }

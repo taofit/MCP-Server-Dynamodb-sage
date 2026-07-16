@@ -8,6 +8,7 @@ import {
   Activity,
   BarChart3,
   Wrench,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "./Logo";
@@ -15,6 +16,7 @@ import { Logo } from "./Logo";
 const navItems = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/chat/", label: "Chat", icon: MessageSquare },
+  { href: "/tables/", label: "Tables", icon: Database },
   { href: "/activity/", label: "Activity", icon: Activity },
   { href: "/monitoring/", label: "Monitoring", icon: BarChart3 },
   { href: "/tools/", label: "Tools", icon: Wrench },

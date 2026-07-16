@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
     ? {
         async rewrites() {
           return [
+            { source: "/api/tables/:name/items", destination: "http://localhost:8081/api/tables/:name/items" },
+            { source: "/api/tables/:name", destination: "http://localhost:8081/api/tables/:name" },
+            { source: "/api/tables", destination: "http://localhost:8081/api/tables" },
             { source: "/api/:path*", destination: "http://localhost:8081/api/:path*" },
             { source: "/sse", destination: "http://localhost:8081/sse" },
             {
