@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"dynamodb-sage/internal/llm"
+	"dynamodb-sage/internal/metrics"
 	"dynamodb-sage/internal/notification"
 	"embed"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -36,9 +38,19 @@ var extContentType = map[string]string{
 	".svg":  "image/svg+xml",
 	".ico":  "image/x-icon",
 	".json": "application/json",
+	".woff": "font/woff",
+	".woff2": "font/woff2",
+	".ttf": "font/ttf",
 }
 
-//go:embed static/*
+func ext(path string) string {
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		return path[i:]
+	}
+	return ""
+}
+
+//go:embed all:static/*
 var dashboardFS embed.FS
 
 func staticFileServer() http.Handler {
@@ -99,8 +111,10 @@ func (srv *Server) handleSSEEvents(w http.ResponseWriter, r *http.Request) {
 
 	ch := make(chan notification.NotificationPayload, 10)
 	srv.sseClients.Store(r.Context(), ch)
+	srv.connCount.Add(1)
 	defer func() {
 		srv.sseClients.Delete(r.Context())
+		srv.connCount.Add(-1)
 		close(ch)
 	}()
 	for {
@@ -140,6 +154,7 @@ func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		defer close(tokenChan)
 		if err := srv.generateChat(msg, tokenChan); err != nil {
 			log.Printf("LLM error: %v", err)
+			tokenChan <- fmt.Sprintf("LLM error: %v", err)
 		}
 	}()
 	flusher, ok := w.(http.Flusher)
@@ -154,10 +169,9 @@ func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
 	for token := range tokenChan {
 		b.WriteString(token)
-		for _, line := range strings.Split(token, "\n") {
-			fmt.Fprintf(w, "data: %s\n", line)
-		}
-		fmt.Fprintf(w, "\n")
+		escaped := strings.ReplaceAll(token, "\\", "\\\\")
+		escaped = strings.ReplaceAll(escaped, "\n", "\\n")
+		fmt.Fprintf(w, "data: %s\n\n", escaped)
 		flusher.Flush()
 	}
 	fmt.Fprintf(w, "data: [DONE]\n\n")
@@ -431,4 +445,73 @@ func (srv *Server) prometheusServer() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.Handler())
 	go http.ListenAndServe(srv.metricsAddr, metricsMux)
+}
+
+func (srv *Server) health() map[string]string {
+	return map[string]string{
+		"dynamodb": srv.dbStatus(),
+		"kafka":    srv.kafkaStatus(),
+		"llm":      srv.llmStatus(),
+	}
+}
+
+func (srv *Server) dbStatus() string {
+	_, err := srv.db.ListTables(context.Background(), &dynamodb.ListTablesInput{})
+	if err != nil {
+		return "error"
+	}
+	return "ok"
+}
+
+func (srv *Server) kafkaStatus() string {
+	if srv.kafkaClient == nil {
+		return "not_configured"
+	}
+	if err := srv.kafkaClient.Ping(); err != nil {
+		return "error"
+	}
+	return "ok"
+}
+
+func (srv *Server) llmStatus() string {
+	if srv.llm == nil {
+		return "not_configured"
+	}
+	if err := srv.llm.Ping(); err != nil {
+		return "error"
+	}
+	return "ok"
+}
+
+func (srv *Server) stats() map[string]interface{} {
+	notifications, err := srv.store.countNotifications()
+	if err != nil {
+		log.Printf("Warning: Failed to count notifications: %v", err)
+	}
+	chatMessages, err := srv.store.countChatMessages()
+	if err != nil {
+		log.Printf("Warning: Failed to count chat messages: %v", err)
+	}
+	numTables, err := srv.countTables()
+	if err != nil {
+		log.Printf("Warning: Failed to count tables: %v", err)
+	}
+	toolCalls := metrics.GetTotalToolInvocations()
+
+	return map[string]interface{}{
+		"active_connections": srv.connCount.Load(),
+		"uptime_seconds":     time.Since(srv.startTime).Seconds(),
+		"tables":             numTables,
+		"chatMessages":       chatMessages,
+		"notifications":      notifications,
+		"toolCalls":          int(toolCalls),
+	}
+}
+
+func (srv *Server) countTables() (int, error) {
+	tableOutput, err := srv.db.ListTables(context.Background(), &dynamodb.ListTablesInput{})
+	if err != nil {
+		return 0, err
+	}
+	return len(tableOutput.TableNames), nil
 }

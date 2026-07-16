@@ -54,3 +54,8 @@ keys/
 # Dependencies
 # (Uncomment if you use vendor directory)
 # vendor/
+
+# Frontend build artifacts
+server/static/
+frontend/out/
+frontend/.next/

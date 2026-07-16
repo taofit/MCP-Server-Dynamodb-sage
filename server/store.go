@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"dynamodb-sage/internal/notification"
+	"fmt"
 
 	_ "modernc.org/sqlite"
 )
@@ -97,6 +98,30 @@ func (s *Store) MarkNotificationAsRead(jobID string) error {
 func (s *Store) AddChatHistory(user, toolName, content string, timestamp int64) error {
 	_, err := s.db.Exec(`INSERT INTO chat_history (user, tool_name, content, timestamp) VALUES (?, ?, ?, ?)`, user, toolName, content, timestamp)
 	return err
+}
+
+func (s *Store) countNotifications() (int, error) {
+	return s.getTotal("notifications")
+}
+
+func (s *Store) countChatMessages() (int, error) {
+	return s.getTotal("chat_history")
+}
+
+func (s *Store) getTotal(tableName string) (int, error) {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var count int
+	if rows.Next() {
+		if err := rows.Scan(&count); err != nil {
+			return 0, err
+		}
+	}
+	return count, nil
 }
 
 func (s *Store) GetChatHistory(limit int) ([]ChatMessage, error) {

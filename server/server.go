@@ -11,6 +11,7 @@ import (
 	"dynamodb-sage/internal/risk"
 	"encoding/json"
 	"iter"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -57,6 +60,8 @@ type Server struct {
 	toolDefs            []llm.ToolDef
 	llm                 *llm.Client
 	rateLimiter         *rate.Limiter
+	connCount           atomic.Int64
+	startTime           time.Time
 }
 
 type ToolInfo struct {
@@ -106,6 +111,7 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 		userARN:      userARN,
 		riskAnalyzer: riskAnalyzer,
 		metricsAddr:  metricsAddr,
+		startTime:    time.Now(),
 	}
 
 	rps := 5.0
@@ -179,20 +185,14 @@ func (srv *Server) HTTPHandler() http.Handler {
 			return
 		}
 
-		if r.Method == http.MethodGet || r.Method == http.MethodHead {
-			if strings.HasPrefix(r.URL.Path, "/static/") {
-				r.URL.Path = strings.TrimPrefix(r.URL.Path, "/static/")
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			// Serve Next.js static assets
+			if strings.HasPrefix(r.URL.Path, "/_next/") {
 				staticFileServer().ServeHTTP(w, r)
 				return
 			}
-			if r.URL.Path == "/" {
-				data, err := dashboardFS.ReadFile("static/index.html")
-				if err == nil {
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.Write(data)
-					return
-				}
-			}
+
+			// API routes
 			if r.URL.Path == "/api/chat" {
 				http.Error(w, "Use POST", http.StatusMethodNotAllowed)
 				return
@@ -215,6 +215,55 @@ func (srv *Server) HTTPHandler() http.Handler {
 				json.NewEncoder(w).Encode(notifications)
 				return
 			}
+			if r.URL.Path == "/api/health" {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(srv.health())
+				return
+			}
+			if r.URL.Path == "/api/stats" {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(srv.stats())
+				return
+			}
+			if r.URL.Path == "/api/tools" {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(srv.toolList)
+				return
+			}
+
+			// SPA routes: try to serve the file, fall back to index.html for client-side routing
+			staticFS, err := fs.Sub(dashboardFS, "static")
+			if err == nil {
+				name := strings.TrimPrefix(r.URL.Path, "/")
+				if name == "" {
+					name = "index.html"
+				}
+				// Try to serve the exact file first
+				data, readErr := fs.ReadFile(staticFS, name)
+				if readErr == nil {
+					w.Header().Set("Content-Type", extContentType[ext(name)])
+					w.Write(data)
+					return
+				}
+				// Try with .html extension
+				if !strings.HasSuffix(name, ".html") {
+					data, readErr = fs.ReadFile(staticFS, name+".html")
+					if readErr == nil {
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						w.Write(data)
+						return
+					}
+				}
+				// Fall back to root index.html for SPA routing
+				data, readErr = fs.ReadFile(staticFS, "index.html")
+				if readErr == nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Write(data)
+					return
+				}
+			}
+			http.NotFound(w, r)
+			return
 		}
 
 		if r.URL.Path == "/api/chat" {

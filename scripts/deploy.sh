@@ -52,8 +52,23 @@ AWS_SECRET=$(awk -F'= ' '/aws_secret_access_key/ {print $2}' "$DIR/keys/lightsai
 cd "$DIR"
 
 echo ""
-echo "=== Step 4: Build Go binary for linux/amd64 (locally) ==="
+echo "=== Step 4: Build frontend and Go binary for linux/amd64 (locally) ==="
 VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}"
+
+# Build frontend
+echo "  Building frontend..."
+cd "$DIR/frontend"
+npm ci --silent 2>/dev/null || npm install --silent
+EXPORT_STATIC=true npm run build
+cd "$DIR"
+
+# Copy frontend build to server/static
+rm -rf "$DIR/server/static"
+mkdir -p "$DIR/server/static"
+cp -r "$DIR/frontend/out/"* "$DIR/server/static/"
+find "$DIR/server/static" -type d -empty -delete 2>/dev/null || true
+
+# Build Go binary
 GOOS=linux GOARCH=amd64 go build -ldflags="-X dynamodb-sage/server.Version=${VERSION} -s -w" -o "/tmp/${APP_NAME}" .
 echo "  Built: /tmp/${APP_NAME}"
 
