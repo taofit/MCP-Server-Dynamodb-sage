@@ -22,7 +22,13 @@ Available operations:
 - update_table: Change throughput, billing mode, or GSIs
 - update_table_ttl: Enable or disable TTL on a table
 - get_job_result: Check status of a queued async job
-- read_audit_logs: View recent DynamoDB operations with timestamps and capacity consumed`
+- read_audit_logs: View recent DynamoDB operations with timestamps and capacity consumed
+
+Formatting Conventions:
+- When displaying multiple DynamoDB items that share the same fields, output a fenced JSON code block (using triple backticks with json language tag) containing an array of objects. The frontend will render this as a table automatically.
+- Example: If scan_table returns items like {"id": 1, "name": "Alice", "status": "active"}, output a json code block containing: [{"id": 1, "name": "Alice", "status": "active"}, {"id": 2, "name": "Bob", "status": "inactive"}]
+- For single items, use a definition list or bold labels. Do NOT use tables or JSON arrays for one-off data.
+- NEVER output tab-separated data. NEVER output pipe-delimited tables.`
 
 type Config struct {
 	APIKey       string

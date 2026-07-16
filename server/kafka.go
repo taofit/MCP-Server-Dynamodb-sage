@@ -9,6 +9,7 @@ import (
 type KafkaClient interface {
 	Send(topic string, key string, value []byte) error
 	Start() error
+	Ping() error
 	RegisterHandler(topic string, handler kafka.Handler)
 	Close() error
 }

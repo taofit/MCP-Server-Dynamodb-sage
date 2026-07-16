@@ -93,12 +93,11 @@ MCP Client (Claude/Cursor/etc)
    - **AI agent reaction** — surfacing security alerts to the LLM agent's context window so it can autonomously propose remediation (e.g., `delete_item` to wipe exposed records).
    - **Multi-channel notifications** — extend `SendNotification` beyond macOS to Slack, email, or webhook sinks (configurable per severity).
 
-8. Web Dashboard — full MCP client + admin UI in the browser:
+8. Web Dashboard — see **Section 16: Dashboard Frontend Refactor** for the full plan. Summary:
    - Served directly from the Go binary at `/` (no separate deployment)
-   - **Chat interface** — user types natural language commands, UI calls MCP tools via `POST /`, displays results like Claude
-   - **SSE notification viewer** — connects to `/sse`, sends `logging/setLevel`, shows real-time operation alerts
-   - **Metrics dashboard** — fetches Prometheus metrics from `:2112/metrics`, renders charts (RCU/WCU usage, risk blocks, latency histograms)
-   - **Admin features** — view audit logs with filters, manage API keys, usage stats
+   - React SPA with Tailwind + shadcn/ui, embedded via `//go:embed`
+   - 5 tabs: Chat (main), Overview, Activity, Monitoring, Tools (hidden)
+   - SSE streaming chat, grouped activity feed, beautiful metrics charts
 
 9. Docker Compose one-liner — `docker compose up` for self-hosting:
    - `docker-compose.yml` with server + optional dashboard
@@ -141,4 +140,47 @@ MCP notifications dispatch via `session.Log()` to all connected sessions. Web da
 - Toast popup notifications via SSE at `/api/events`
 - API endpoint `GET /api/notifications` for persisted notification history
 - Metrics dashboard rendering Prometheus data from `:2112/metrics`
+
+---
+
+## 16. Dashboard Frontend
+
+The frontend has been rewritten from vanilla JS to **Next.js 16 (App Router) + React + TypeScript** with static export (`output: 'export'`). The built output is embedded in the Go binary via `//go:embed`.
+
+| Layer | Technology |
+|-------|------------|
+| Framework | Next.js 16 (App Router) + TypeScript |
+| Styling | Tailwind CSS 4 + shadcn/ui |
+| Charts | Recharts |
+| Markdown | react-markdown + remark-gfm |
+| State | Zustand |
+| Build | `EXPORT_STATIC=true npm run build` → `out/` → copied to `server/static/` |
+
+### Tabs
+
+| Tab | Purpose |
+|-----|---------|
+| **Chat** | Main NL interface — streaming SSE chat with Claude, markdown rendering, JSON-to-table conversion |
+| **Overview** | Landing page with stats, quick actions, health indicators |
+| **Activity** | Grouped audit feed — operations organized by table |
+| **Monitoring** | Prometheus metrics with Recharts visualizations |
+| **Tools** | Manual MCP tool playground (hidden, accessible via `?tools=true`) |
+
+### Deployment
+
+```
+Next.js out/ → server/static/ → //go:embed static/* → Go binary
+```
+
+For local development, run `cd frontend && npm run dev` (port 3000) alongside the Go backend (port 8080/8081). Next.js proxies `/api/*` to the Go server.
+
+### Build
+
+```bash
+cd frontend && EXPORT_STATIC=true npm run build
+rm -rf ../server/static && mkdir -p ../server/static
+cp -r out/* ../server/static/
+```
+
+Or use the full deploy script which handles this automatically: `./scripts/deploy.sh <domain>`
 

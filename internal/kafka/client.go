@@ -56,3 +56,17 @@ func (c *Client) Close() error {
 
 	return nil
 }
+
+func (c *Client) Ping() error {
+	if c.Config == nil || len(c.Config.Brokers) == 0 {
+		return fmt.Errorf("kafka client not configured")
+	}
+	producer, err := newProducer(&saramaProducerConfig{
+		brokers: c.Config.Brokers,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create sync producer: %v", err)
+	}
+	defer producer.Close()
+	return nil
+}

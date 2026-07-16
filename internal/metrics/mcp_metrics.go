@@ -6,6 +6,7 @@ package metrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	dto "github.com/prometheus/client_model/go"
 )
 
 var (
@@ -31,3 +32,19 @@ var (
 		Buckets:   []float64{0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5},
 	}, []string{"tool", "type"})
 )
+
+// GetTotalToolInvocations returns the sum of all tool invocations across all label values.
+func GetTotalToolInvocations() float64 {
+	ch := make(chan prometheus.Metric, 1024)
+	MCPToolInvocationsTotal.Collect(ch)
+	close(ch)
+	var sum float64
+	for m := range ch {
+		var dtoMetric dto.Metric
+		if err := m.Write(&dtoMetric); err == nil && dtoMetric.Counter != nil {
+			sum += *dtoMetric.Counter.Value
+		}
+	}
+	return sum
+}
+

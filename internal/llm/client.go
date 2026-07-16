@@ -217,3 +217,24 @@ func convertToolDefs(toolDefs []ToolDef) []anthropic.ToolUnionParam {
 	}
 	return tools
 }
+
+func (c *Client) Ping() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	stream := c.claudeClient.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
+		Model: c.model,
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("Hello"),
+			),
+		},
+		MaxTokens: 10,
+	})
+	defer stream.Close()
+	for stream.Next() {
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		return err
+	}
+	return nil
+}
