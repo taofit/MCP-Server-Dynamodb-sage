@@ -28,6 +28,7 @@ interface Stats {
 
 const quickActions = [
   { label: "New Query", href: "/chat/", icon: MessageSquare, color: "text-blue-500" },
+  { label: "Browse Tables", href: "/tables/", icon: Database, color: "text-violet-500" },
   { label: "View Activity", href: "/activity/", icon: Activity, color: "text-amber-500" },
   { label: "Check Metrics", href: "/monitoring/", icon: BarChart3, color: "text-emerald-500" },
 ];
@@ -74,10 +75,6 @@ export default function OverviewPage() {
       .then((r) => r.json())
       .then(setStats)
       .catch(() => {});
-
-    // Connect to SSE to track active connections
-    const evtSource = new EventSource("/api/events");
-    return () => evtSource.close();
   }, []);
 
   const statCards = [
@@ -122,7 +119,7 @@ export default function OverviewPage() {
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
           Quick Actions
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {quickActions.map((action) => (
             <Link
               key={action.label}

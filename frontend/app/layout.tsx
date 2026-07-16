@@ -4,6 +4,8 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { SSEProvider } from "@/components/SSEProvider";
+import { ToastContainer } from "@/components/ToastNotification";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,13 +36,16 @@ export default function RootLayout({
     >
       <body className="h-full antialiased">
         <ThemeProvider>
-          <div className="flex h-full">
-            <Sidebar />
-            <div className="flex flex-col flex-1 min-w-0">
-              <Header />
-              <main className="flex-1 flex flex-col overflow-auto min-h-0">{children}</main>
+          <SSEProvider>
+            <div className="flex h-full">
+              <Sidebar />
+              <div className="flex flex-col flex-1 min-w-0">
+                <Header />
+                <main className="flex-1 flex flex-col overflow-auto min-h-0">{children}</main>
+              </div>
             </div>
-          </div>
+            <ToastContainer />
+          </SSEProvider>
         </ThemeProvider>
       </body>
     </html>

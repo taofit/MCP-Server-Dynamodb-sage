@@ -10,14 +10,17 @@ import {
   Activity,
   BarChart3,
   Wrench,
+  Database,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
+import { NotificationBell } from "@/components/NotificationBell";
 
 const mobileNavItems = [
   { href: "/", label: "Home", icon: LayoutDashboard },
   { href: "/chat/", label: "Chat", icon: MessageSquare },
+  { href: "/tables/", label: "Tables", icon: Database },
   { href: "/activity/", label: "Activity", icon: Activity },
   { href: "/monitoring/", label: "Metrics", icon: BarChart3 },
   { href: "/tools/", label: "Tools", icon: Wrench },
@@ -46,14 +49,17 @@ export function Header() {
       {/* Spacer for desktop */}
       <div className="hidden md:block" />
 
-      {/* Theme toggle */}
-      <Button variant="ghost" size="icon" onClick={toggle}>
-        {theme === "dark" ? (
-          <Sun className="w-5 h-5 text-muted-foreground" />
-        ) : (
-          <Moon className="w-5 h-5 text-muted-foreground" />
-        )}
-      </Button>
+      {/* Right side actions */}
+      <div className="flex items-center gap-1">
+        <NotificationBell />
+        <Button variant="ghost" size="icon" onClick={toggle}>
+          {theme === "dark" ? (
+            <Sun className="w-5 h-5 text-muted-foreground" />
+          ) : (
+            <Moon className="w-5 h-5 text-muted-foreground" />
+          )}
+        </Button>
+      </div>
 
       {/* Mobile nav dropdown */}
       {mobileOpen && (
