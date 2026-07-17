@@ -1,446 +1,251 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Send, Loader2, Trash2 } from "lucide-react";
-import { useChatStore } from "@/store/chat";
+import { useEffect, useState } from "react";
+import {
+  MessageSquare,
+  Activity,
+  BarChart3,
+  ArrowRight,
+  Database,
+  MessageSquareText,
+  Bell,
+  Zap,
+  Link2,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+} from "lucide-react";
+import Link from "next/link";
+import { Skeleton } from "@/components/ui/skeleton";
 
-const suggestedPrompts = [
-  "List all my DynamoDB tables",
-  "Show me the schema of the users table",
-  "Query orders where userId = 123",
-  "How many items are in each table?",
+type HealthStatus = "ok" | "error" | "not_configured";
+
+interface Stats {
+  tables: number;
+  chatMessages: number;
+  notifications: number;
+  toolCalls: number;
+  active_connections: number;
+  uptime_seconds: number;
+}
+
+interface Notification {
+  title: string;
+  jobId: string;
+  table: string;
+  severity: string;
+  operation: string;
+  message: string;
+  timestamp: number;
+}
+
+const quickActions = [
+  { label: "New Query", href: "/", icon: MessageSquare, color: "text-blue-500" },
+  { label: "Browse Tables", href: "/tables/", icon: Database, color: "text-violet-500" },
+  { label: "View Activity", href: "/activity/", icon: Activity, color: "text-amber-500" },
+  { label: "Check Metrics", href: "/monitoring/", icon: BarChart3, color: "text-emerald-500" },
 ];
 
-function extractPipeCells(line: string): string[] {
-  const cells = line.split("|").map(c => c.trim());
-  if (cells[0] === "") cells.shift();
-  if (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
-  return cells;
+const statusColor: Record<HealthStatus, string> = {
+  ok: "bg-emerald-500",
+  error: "bg-red-500",
+  not_configured: "bg-zinc-600",
+};
+
+const statusLabel: Record<HealthStatus, string> = {
+  ok: "Operational",
+  error: "Error",
+  not_configured: "Not configured",
+};
+
+const sevIcon: Record<string, React.ReactNode> = {
+  success: <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />,
+  error: <XCircle className="w-3.5 h-3.5 text-red-500" />,
+  warning: <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />,
+};
+
+const services = [
+  { key: "dynamodb", label: "DynamoDB" },
+  { key: "kafka", label: "Kafka" },
+  { key: "llm", label: "LLM API" },
+] as const;
+
+function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
-function extractTabCells(line: string, preserveEmpty = false): string[] {
-  const cells = line.split("\t").map(c => c.trim());
-  if (preserveEmpty) return cells;
-  return cells.filter(c => c !== "");
-}
-
-function isSeparatorOnly(line: string): boolean {
-  const t = line.trim();
-  if (t.includes("|")) {
-    const cells = t.split("|").map(c => c.trim()).filter(c => c);
-    return cells.length >= 2 && cells.every(c => /^-+$/.test(c));
-  }
-  if (t.includes("\t")) {
-    const cells = t.split("\t").map(c => c.trim()).filter(c => c);
-    return cells.length >= 2 && cells.every(c => /^-+$/.test(c));
-  }
-  return /^-{3,}$/.test(t);
-}
-
-function buildTable(colCount: number, header: string[], dataCells: string[]): string[] {
-  const rows: string[] = [];
-  rows.push("| " + header.join(" | ") + " |");
-  rows.push("| " + header.map(() => "---").join(" | ") + " |");
-  for (let i = 0; i < dataCells.length; i += colCount) {
-    const row = dataCells.slice(i, i + colCount);
-    while (row.length < colCount) row.push("");
-    if (row.length === colCount && row.some(c => c !== "")) {
-      rows.push("| " + row.join(" | ") + " |");
-    }
-  }
-  return rows;
-}
-
-function flattenTabLines(lines: string[]): string[][] {
-  const allCells: string[] = [];
-  for (const line of lines) {
-    const t = line.trim();
-    if (!t || !t.includes("\t")) continue;
-    const cells = t.split("\t");
-    for (const c of cells) allCells.push(c.trim());
-  }
-  if (allCells.length < 4) return [];
-  let colCount = 0;
-  for (let n = 2; n <= Math.min(20, Math.floor(allCells.length / 2)); n++) {
-    if (allCells.length % n === 0) { colCount = n; break; }
-  }
-  if (colCount === 0) colCount = Math.floor(Math.sqrt(allCells.length));
-  const rows: string[][] = [];
-  for (let i = 0; i < allCells.length; i += colCount) {
-    const row = allCells.slice(i, i + colCount);
-    if (row.length === colCount) rows.push(row);
-  }
-  return rows;
-}
-
-function findJsonArray(text: string): string | null {
-  const start = text.indexOf("[");
-  if (start === -1) return null;
-  let depth = 0, inString = false, escape = false;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (escape) { escape = false; continue; }
-    if (ch === "\\") { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === "[") depth++;
-    if (ch === "]") { depth--; if (depth === 0) return text.substring(start, i + 1); }
-  }
-  return null;
-}
-
-function tryParseJsonArray(text: string): string[][] | null {
-  let raw = text;
-  raw = raw.replace(/\\n/g, " ").replace(/\\r/g, " ");
-  raw = raw.replace(/[\r\n]+/g, " ");
-  raw = raw.replace(/\s+/g, " ").trim();
-
-  const jsonStr = findJsonArray(raw);
-  if (!jsonStr) return null;
-
-  try {
-    const arr = JSON.parse(jsonStr);
-    if (Array.isArray(arr) && arr.length > 0 && typeof arr[0] === "object") {
-      const keysSet = new Set<string>();
-      for (const item of arr) {
-        if (item && typeof item === "object") {
-          for (const k of Object.keys(item)) keysSet.add(k);
-        }
-      }
-      const keys = Array.from(keysSet);
-      if (keys.length >= 2) {
-        const rows: string[][] = [keys];
-        for (const item of arr) {
-          rows.push(keys.map(k => String(item[k] ?? "")));
-        }
-        return rows;
-      }
-    }
-  } catch {}
-  return null;
-}
-
-function JsonTable({ text, className }: { text: string; className?: string }) {
-  const rows = tryParseJsonArray(text);
-  if (rows) {
-    const header = rows[0];
-    return (
-      <table className="json-table">
-        <thead>
-          <tr>{header.map((h, i) => <th key={i}>{h}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.slice(1).map((row, ri) => (
-            <tr key={ri}>{row.map((cell, ci) => <td key={ci}>{cell}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
-    );
-  }
-  return <code className={className}>{text}</code>;
-}
-
-function fixMarkdownTables(text: string): string {
-  let result = text;
-
-  const lines = result.split("\n");
-  const out: string[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    // --- Single-line flattened pipe table (header|data|data|... on one line) ---
-    if (trimmed.includes("|") && !trimmed.includes("\t")) {
-      const cells = extractPipeCells(trimmed);
-      if (cells.length >= 4) {
-        // Case 1: has --- separator cells
-        let sepIdx = -1;
-        let colCount = 0;
-        for (let s = 0; s < cells.length; s++) {
-          if (/^-+$/.test(cells[s])) {
-            let count = 0;
-            for (let j = s; j < cells.length; j++) {
-              if (/^-+$/.test(cells[j])) count++;
-              else break;
-            }
-            if (count >= 2) { sepIdx = s; colCount = count; break; }
-          }
-        }
-        if (sepIdx !== -1 && colCount >= 2) {
-          const header = cells.slice(0, sepIdx).filter(c => c !== "").slice(-colCount);
-          const data = cells.slice(sepIdx + colCount).filter(c => c !== "");
-          out.push(...buildTable(colCount, header, data));
-          i++;
-          continue;
-        }
-
-        // Case 2: empty cells as row separators (| | | pattern)
-        const firstEmpty = cells.findIndex(c => c === "");
-        if (firstEmpty > 0) {
-          const header = cells.slice(0, firstEmpty);
-          const colCount2 = header.length;
-          if (colCount2 >= 2) {
-            const data = cells.slice(firstEmpty);
-            out.push(...buildTable(colCount2, header, data));
-            i++;
-            continue;
-          }
-        }
-      }
-    }
-
-    // --- Multi-line table: collect consecutive pipe-delimited lines ---
-    if (trimmed.includes("|") && !trimmed.includes("\t")) {
-      const pipeGroup: string[] = [];
-      let j = i;
-      while (j < lines.length) {
-        const t = lines[j].trim();
-        if (t.includes("|") && !t.includes("\t")) {
-          pipeGroup.push(t);
-          j++;
-        } else break;
-      }
-      if (pipeGroup.length >= 2) {
-        const allCells: string[][] = [];
-        for (const pl of pipeGroup) {
-          const c = extractPipeCells(pl);
-          if (c.length >= 2 && !isSeparatorOnly(pl)) allCells.push(c);
-        }
-        if (allCells.length >= 2) {
-          const header = allCells[0];
-          const colCount = header.length;
-          if (colCount >= 2) {
-            const dataCells: string[] = [];
-            for (let r = 1; r < allCells.length; r++) dataCells.push(...allCells[r]);
-            out.push(...buildTable(colCount, header, dataCells));
-            i = j;
-            continue;
-          }
-        }
-      }
-    }
-
-    // --- Tab-separated data ---
-    if (trimmed.includes("\t") && !trimmed.includes("|")) {
-      const tabGroup: string[] = [];
-      let j = i;
-      while (j < lines.length) {
-        const t = lines[j].trim();
-        if (t.includes("\t") && t.length > 0) {
-          tabGroup.push(lines[j]);
-          j++;
-        } else break;
-      }
-      if (tabGroup.length >= 2) {
-        const rows = flattenTabLines(tabGroup);
-        if (rows.length >= 2 && rows[0].length >= 2) {
-          const header = rows[0];
-          const colCount = header.length;
-          const dataCells: string[] = [];
-          for (let r = 1; r < rows.length; r++) {
-            for (let c = 0; c < colCount; c++) dataCells.push(c < rows[r].length ? rows[r][c] : "");
-          }
-          out.push(...buildTable(colCount, header, dataCells));
-          i = j;
-          continue;
-        }
-      }
-    }
-
-    out.push(line);
-    i++;
-  }
-
-  return out.join("\n");
-}
-
-export default function ChatPage() {
-  const messages = useChatStore((s) => s.messages);
-  const addMessage = useChatStore((s) => s.addMessage);
-  const updateMessage = useChatStore((s) => s.updateMessage);
-  const clearMessages = useChatStore((s) => s.clearMessages);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+export default function OverviewPage() {
+  const [health, setHealth] = useState<Record<string, HealthStatus>>({});
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [recentActivity, setRecentActivity] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    Promise.all([
+      fetch("/api/health")
+        .then((r) => r.json())
+        .then(setHealth)
+        .catch(() =>
+          setHealth({ dynamodb: "error", kafka: "error", llm: "error" })
+        ),
+      fetch("/api/stats")
+        .then((r) => r.json())
+        .then(setStats)
+        .catch(() => {}),
+      fetch("/api/notifications")
+        .then((r) => r.json())
+        .then((data: Notification[]) => setRecentActivity(data.slice(0, 8)))
+        .catch(() => {}),
+    ]).finally(() => setLoading(false));
+  }, []);
 
-  const sendMessage = async (content?: string) => {
-    const text = content ?? input.trim();
-    if (!text || isLoading) return;
-
-    addMessage({ role: "user", content: text });
-    setInput("");
-    setIsLoading(true);
-
-    const assistantId = addMessage({ role: "assistant", content: "" });
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let accumulated = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const token = line.slice(6).trim();
-            if (token === "[DONE]") continue;
-
-            accumulated += token.replace(/\\n/g, "\n");
-            updateMessage(assistantId, accumulated);
-          }
-        }
-      }
-    } catch (err) {
-      updateMessage(
-        assistantId,
-        `Error: ${err instanceof Error ? err.message : "Unknown error"}`
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const statCards = [
+    { label: "Tables", value: stats?.tables ?? "—", icon: Database, color: "text-blue-500" },
+    { label: "Chat Messages", value: stats?.chatMessages ?? "—", icon: MessageSquareText, color: "text-violet-500" },
+    { label: "Tool Calls", value: stats?.toolCalls ?? "—", icon: Zap, color: "text-amber-500" },
+    { label: "Notifications", value: stats?.notifications ?? "—", icon: Bell, color: "text-rose-500" },
+    { label: "Connections", value: stats?.active_connections ?? "—", icon: Link2, color: "text-emerald-500" },
+    { label: "Uptime", value: stats ? formatUptime(stats.uptime_seconds) : "—", icon: Clock, color: "text-cyan-500" },
+  ];
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full space-y-8">
-            <div className="text-center space-y-2">
-              <h1 className="text-2xl font-bold">DynamoDB Sage</h1>
-              <p className="text-muted-foreground text-sm">
-                Ask anything about your DynamoDB tables in natural language.
-                I can list tables, query data, scan records, create or delete tables, and more — just describe what you need.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
-              {suggestedPrompts.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => sendMessage(prompt)}
-                  className="text-left text-sm px-4 py-3 rounded-xl border border-border bg-card/50 hover:border-border hover:bg-accent/50 transition-colors"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[80%] px-4 py-3 rounded-2xl ${
-                msg.role === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-card border border-border"
-              }`}
-            >
-              <div className={`prose prose-sm max-w-none ${msg.role === "assistant" ? "prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-th:text-foreground prose-td:text-foreground prose-code:text-foreground prose-code:bg-accent/50 prose-strong:text-foreground prose-a:text-blue-500" : "prose-invert"}`}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-                  pre({ children }) {
-                    const child = children as React.ReactElement;
-                    if (child && typeof child === "object" && "props" in child) {
-                      const p = child.props as Record<string, unknown>;
-                      const cls = typeof p.className === "string" ? p.className : "";
-                      if (cls.includes("language-json")) {
-                        const txt = typeof p.children === "string" ? p.children : String(p.children ?? "");
-                        return <JsonTable text={txt} className={cls} />;
-                      }
-                    }
-                    return <pre>{children}</pre>;
-                  }
-                }}>
-                  {fixMarkdownTables(msg.content)}
-                </ReactMarkdown>
-              </div>
-              <span className={`text-[10px] mt-1 block ${msg.role === "user" ? "text-blue-200" : "text-muted-foreground"}`}>
-                {new Date(msg.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
-          </div>
-        ))}
-
-        {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-card border border-border px-4 py-3 rounded-2xl flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm text-muted-foreground">Thinking...</span>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+    <div className="flex-1 p-6 max-w-5xl mx-auto w-full space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          Natural language interface for Amazon DynamoDB — query, modify, and explore your tables using everyday English. Powered by MCP tool-calling with built-in guardrails, risk analysis, and audit logging.
+        </p>
       </div>
 
-      {/* Input Area */}
-      <div className="border-t border-border p-4 bg-background/80">
-        <div className="flex gap-2 max-w-4xl mx-auto">
-          {messages.length > 0 && (
-            <button
-              onClick={clearMessages}
-              className="px-3 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:border-border transition-colors flex items-center"
-              title="Clear chat"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="Ask anything about your DynamoDB tables..."
-            rows={1}
-            className="flex-1 bg-card border border-border rounded-xl px-5 py-3 focus:outline-none focus:border-blue-500 text-sm placeholder:text-muted-foreground resize-none overflow-y-auto max-h-32"
-            style={{ fieldSizing: "content" }}
-            disabled={isLoading}
-          />
-          <button
-            onClick={() => sendMessage()}
-            disabled={isLoading || !input.trim()}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-muted text-white px-6 rounded-xl flex items-center justify-center transition-colors"
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        {loading
+          ? Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border bg-card/50 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <Skeleton className="w-20 h-3" />
+                  <Skeleton className="w-4 h-4 rounded" />
+                </div>
+                <Skeleton className="w-16 h-7" />
+              </div>
+            ))
+          : statCards.map((stat) => (
+          <div
+            key={stat.label}
+            className="rounded-xl border border-border bg-card/50 p-4"
           >
-            {isLoading ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <Send className="w-5 h-5" />
-            )}
-          </button>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs text-muted-foreground uppercase tracking-wider">
+                {stat.label}
+              </span>
+              <stat.icon className={`w-4 h-4 ${stat.color}`} />
+            </div>
+            <p className="text-2xl font-bold">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Quick Actions */}
+      <div>
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Quick Actions
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {quickActions.map((action) => (
+            <Link
+              key={action.label}
+              href={action.href}
+              className="group flex items-center justify-between rounded-xl border border-border bg-card/50 p-4 hover:border-border hover:bg-accent/50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <action.icon className={`w-5 h-5 ${action.color}`} />
+                <span className="text-sm font-medium">{action.label}</span>
+              </div>
+              <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent Activity */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            Recent Activity
+          </h2>
+          <Link href="/activity/" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            View all →
+          </Link>
+        </div>
+        {loading ? (
+          <div className="rounded-xl border border-border bg-card/50 divide-y divide-border">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-2.5">
+                <div className="flex items-center gap-3">
+                  <Skeleton className="w-3.5 h-3.5 rounded" />
+                  <Skeleton className="w-20 h-4" />
+                  <Skeleton className="w-8 h-3" />
+                  <Skeleton className="w-16 h-4" />
+                </div>
+                <Skeleton className="w-14 h-3" />
+              </div>
+            ))}
+          </div>
+        ) : recentActivity.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card/50 p-4 text-center text-sm text-muted-foreground">
+            No recent activity
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border bg-card/50 divide-y divide-border">
+            {recentActivity.map((n, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-2.5">
+                <div className="flex items-center gap-3">
+                  {sevIcon[n.severity] || sevIcon.success}
+                  <span className="text-sm">{n.operation}</span>
+                  <span className="text-xs text-muted-foreground">on</span>
+                  <span className="text-sm font-medium">{n.table}</span>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {new Date(n.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* System Health */}
+      <div>
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          System Health
+        </h2>
+        <div className="rounded-xl border border-border bg-card/50 divide-y divide-border">
+          {services.map(({ key, label }) => {
+            const status = health[key] ?? "not_configured";
+            return (
+              <div
+                key={key}
+                className="flex items-center justify-between px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`w-2 h-2 rounded-full ${statusColor[status]}`}
+                  />
+                  <span className="text-sm">{label}</span>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {statusLabel[status]}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

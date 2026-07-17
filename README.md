@@ -387,11 +387,13 @@ Open `https://dynamodb-sage.yourdomain.com/` in a browser. A Next.js SPA embedde
 
 | Tab | Description |
 |-----|-------------|
-| Chat | LLM-powered natural language interface with streaming responses, markdown tables, JSON rendering |
-| Overview | Landing page with stats, quick actions, and system health |
-| Activity | Grouped audit feed — operations organized by table with filters |
-| Monitoring | Prometheus metrics dashboard with Recharts visualizations |
+| Chat | **Default landing page.** AI-powered natural language interface with streaming responses, markdown tables, JSON rendering, copy button on messages, and suggested prompts |
+| Overview | Summary dashboard with stats, quick actions, recent activity feed, and system health |
+| Activity | Grouped audit feed with success rate %, time filters (Today/This Week/All), and search |
+| Monitoring | Prometheus metrics dashboard with trend charts, metric cards, and color-coded health status |
 | Tools | Interactive DynamoDB tool playground (hidden by default, accessible via `?tools=true`) |
+
+**Built-in features:** Dark/light mode toggle, Sonner toast notifications, loading skeletons, responsive mobile layout
 
 ---
 
