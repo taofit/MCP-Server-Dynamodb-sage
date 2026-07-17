@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
+import { toast } from "sonner";
 import { useNotificationsStore, Notification } from "@/store/notifications";
 
 export function SSEProvider({ children }: { children: React.ReactNode }) {
-  const pushToast = useNotificationsStore((s) => s.pushToast);
   const fetchNotifications = useNotificationsStore((s) => s.fetchNotifications);
 
   useEffect(() => {
@@ -19,7 +19,16 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
       evtSource.onmessage = (event) => {
         try {
           const data: Notification = JSON.parse(event.data);
-          pushToast(data);
+          const desc = [data.table, data.message].filter(Boolean).join(" — ");
+          if (data.severity === "error") {
+            toast.error(data.operation, { description: desc });
+          } else if (data.severity === "warning") {
+            toast.warning(data.operation, { description: desc });
+          } else if (data.severity === "success") {
+            toast.success(data.operation, { description: desc });
+          } else {
+            toast.info(data.operation, { description: desc });
+          }
           fetchNotifications();
         } catch {
           // ignore malformed events
@@ -40,7 +49,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       source.close();
     };
-  }, [pushToast, fetchNotifications]);
+  }, [fetchNotifications]);
 
   return <>{children}</>;
 }

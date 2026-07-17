@@ -141,7 +141,7 @@ func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *
 	recordConsumedCapacity("put_item", args.TableName, "WCU", output.ConsumedCapacity)
 	srv.sendAuditLog("put_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
-	srv.sendMutationNotification(args.TableName, "put_item", "success", "Item put successfully")
+	srv.recordNotification(args.TableName, "put_item", "success", "Item put successfully")
 	return srv.successResult(fmt.Sprintf("Successfully put item into table %s", args.TableName)), nil, nil
 }
 
@@ -553,7 +553,7 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	scrubbedItems := srv.guardrail.ScrubItems("delete_item", args.TableName, []map[string]any{attributes})
 	itemJSON, _ := json.Marshal(scrubbedItems[0])
 	keyJSON, _ := json.Marshal(args.Key)
-	srv.sendMutationNotification(args.TableName, "delete_item", "success", fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJSON), args.TableName, string(itemJSON)))
+	srv.recordNotification(args.TableName, "delete_item", "success", fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJSON), args.TableName, string(itemJSON)))
 
 	return srv.successResult(fmt.Sprintf("Successfully deleted item %s from table: %s. Attributes: %s", string(keyJSON), args.TableName, string(itemJSON))), nil, nil
 }
@@ -677,7 +677,7 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		scrubbedAttributeJSON, _ := json.Marshal(scrubbedItem)
 		attributesMsg = fmt.Sprintf(", Attributes: %s", string(scrubbedAttributeJSON))
 	}
-	srv.sendMutationNotification(args.TableName, "update_item", "success", fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJSON), args.TableName, attributesMsg))
+	srv.recordNotification(args.TableName, "update_item", "success", fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJSON), args.TableName, attributesMsg))
 
 	return srv.successResult(fmt.Sprintf("Successfully updated item %v from table %s%s", string(keyJSON), args.TableName, attributesMsg)), nil, nil
 }
@@ -960,10 +960,10 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 	srv.sendAuditLog("update_table", args.TableName, "", nil, nil)
 
 	if len(tags) > 0 {
-		srv.sendMutationNotification(args.TableName, "update_table", "success", fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v\n Tags applied: %s", args.TableName, output.TableDescription.TableStatus, tagSummary(tags)))
+		srv.recordNotification(args.TableName, "update_table", "success", fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v\n Tags applied: %s", args.TableName, output.TableDescription.TableStatus, tagSummary(tags)))
 		return srv.successResult(fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v\n Tags applied: %s", args.TableName, output.TableDescription.TableStatus, tagSummary(tags))), nil, nil
 	}
-	srv.sendMutationNotification(args.TableName, "update_table", "success", fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v", args.TableName, output.TableDescription.TableStatus))
+	srv.recordNotification(args.TableName, "update_table", "success", fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v", args.TableName, output.TableDescription.TableStatus))
 
 	return srv.successResult(fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v", args.TableName, output.TableDescription.TableStatus)), nil, nil
 }
@@ -1028,7 +1028,7 @@ func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, ar
 		return srv.errorResult(fmt.Sprintf("DeleteTable %s failed: %v", args.TableName, err)), nil, nil
 	}
 	srv.sendAuditLog("delete_table", args.TableName, "", nil, nil)
-	srv.sendMutationNotification(args.TableName, "delete_table", "success", fmt.Sprintf("Successfully deleted table %s", args.TableName))
+	srv.recordNotification(args.TableName, "delete_table", "success", fmt.Sprintf("Successfully deleted table %s", args.TableName))
 
 	return srv.successResult(fmt.Sprintf("Successfully deleted table %s", args.TableName)), nil, nil
 }
@@ -1421,7 +1421,7 @@ func (srv *Server) processHeavyOpForQueue(key string, payload []byte) error {
 	}{}
 	if err := json.Unmarshal(payload, &jobPayload); err != nil {
 		jr.Error = fmt.Errorf("failed to unmarshal job payload: %v", err)
-		srv.sendMutationNotification("unknown", jobPayload.Operation, "error", jr.Error.Error())
+		srv.recordNotification("unknown", jobPayload.Operation, "error", jr.Error.Error())
 		return jr.Error
 	}
 
@@ -1432,10 +1432,10 @@ func (srv *Server) processHeavyOpForQueue(key string, payload []byte) error {
 	srv.executeJobOp(jr, payload)
 
 	if jr.Error != nil {
-		srv.sendMutationNotification(tableName.TableName, jobPayload.Operation, "error", jr.Error.Error())
+		srv.recordNotification(tableName.TableName, jobPayload.Operation, "error", jr.Error.Error())
 		return jr.Error
 	}
-	srv.sendMutationNotification(tableName.TableName, jobPayload.Operation, "success", "completed")
+	srv.recordNotification(tableName.TableName, jobPayload.Operation, "success", "completed")
 	return nil
 }
 

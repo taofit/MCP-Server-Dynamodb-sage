@@ -57,7 +57,7 @@ func (srv *Server) broadcastToSSE(notf notification.NotificationPayload) {
 	})
 }
 
-func (srv *Server) sendMutationNotification(table, operation, severity, message string) {
+func (srv *Server) recordNotification(table, operation, severity, message string) {
 	notf := notification.NotificationPayload{
 		Title:     fmt.Sprintf("%s on %s", operation, table),
 		Table:     table,

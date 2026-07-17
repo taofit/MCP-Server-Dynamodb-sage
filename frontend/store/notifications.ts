@@ -16,21 +16,12 @@ export function notifId(n: Notification): string {
   return `${n.jobId}-${n.timestamp}`;
 }
 
-export interface Toast {
-  id: string;
-  notification: Notification;
-  createdAt: number;
-}
-
 interface NotificationsState {
   notifications: Notification[];
   readIds: string[];
-  toasts: Toast[];
   fetchNotifications: () => Promise<void>;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
-  pushToast: (n: Notification) => void;
-  dismissToast: (id: string) => void;
 }
 
 export const useNotificationsStore = create<NotificationsState>()(
@@ -38,7 +29,6 @@ export const useNotificationsStore = create<NotificationsState>()(
     (set) => ({
       notifications: [],
       readIds: [],
-      toasts: [],
 
       fetchNotifications: async () => {
         try {
@@ -61,24 +51,6 @@ export const useNotificationsStore = create<NotificationsState>()(
       markAllAsRead: () => {
         set((state) => ({
           readIds: state.notifications.map(notifId),
-        }));
-      },
-
-      pushToast: (n: Notification) => {
-        const id = notifId(n) + "-toast-" + Date.now();
-        set((state) => ({
-          toasts: [...state.toasts, { id, notification: n, createdAt: Date.now() }],
-        }));
-        setTimeout(() => {
-          set((state) => ({
-            toasts: state.toasts.filter((t) => t.id !== id),
-          }));
-        }, 5000);
-      },
-
-      dismissToast: (id: string) => {
-        set((state) => ({
-          toasts: state.toasts.filter((t) => t.id !== id),
         }));
       },
     }),

@@ -22,6 +22,7 @@ import {
   Gauge,
   MessageSquare,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type HealthStatus = "ok" | "error" | "not_configured";
 
@@ -651,7 +652,15 @@ export default function MonitoringPage() {
           System Health
         </h3>
         {loading ? (
-          <div className="text-muted-foreground text-sm">Loading...</div>
+          <div className="flex gap-8">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Skeleton className="w-2.5 h-2.5 rounded-full" />
+                <Skeleton className="w-16 h-4" />
+                <Skeleton className="w-20 h-3" />
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="flex gap-8">
             {services.map(({ key, label }) => {

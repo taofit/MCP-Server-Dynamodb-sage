@@ -18,8 +18,8 @@ import { usePathname } from "next/navigation";
 import { NotificationBell } from "@/components/NotificationBell";
 
 const mobileNavItems = [
-  { href: "/", label: "Home", icon: LayoutDashboard },
-  { href: "/chat/", label: "Chat", icon: MessageSquare },
+  { href: "/", label: "Chat", icon: MessageSquare },
+  { href: "/chat/", label: "Overview", icon: LayoutDashboard },
   { href: "/tables/", label: "Tables", icon: Database },
   { href: "/activity/", label: "Activity", icon: Activity },
   { href: "/monitoring/", label: "Metrics", icon: BarChart3 },

@@ -5,7 +5,7 @@ import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { SSEProvider } from "@/components/SSEProvider";
-import { ToastContainer } from "@/components/ToastNotification";
+import { Toaster } from "sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -44,7 +44,7 @@ export default function RootLayout({
                 <main className="flex-1 flex flex-col overflow-auto min-h-0">{children}</main>
               </div>
             </div>
-            <ToastContainer />
+            <Toaster richColors position="bottom-right" />
           </SSEProvider>
         </ThemeProvider>
       </body>
