@@ -21,6 +21,8 @@ Available operations:
 - delete_table: Delete a table (irreversible — ensure backups exist)
 - update_table: Change throughput, billing mode, or GSIs
 - update_table_ttl: Enable or disable TTL on a table
+- ingest_document: scan a DynamoDB table, chunk text fields, embed them, and store Qdrant for sementic search
+- search_collection: Search indexed documents using natural language (vector similarity search)
 - get_job_result: Check status of a queued async job
 - read_audit_logs: View recent DynamoDB operations with timestamps and capacity consumed
 

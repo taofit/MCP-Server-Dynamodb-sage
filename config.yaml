@@ -62,3 +62,21 @@ risk_thresholds:
   batch_put_count: 100 # warn if putting > 100 items
   max_throughput_increase: 2000
   update_expression_depth: 5
+
+rag:
+  enabled: true
+  embedding:
+    provider: openai
+    model: text-embedding-3-small
+    dimensions: 1536
+  vector_db:
+    provider: qdrant
+    host: localhost
+    port: 6334
+  chunking:
+    max_tokens: 500
+    overlap: 50
+  retrieval:
+    top_k: 20
+    score_threshold: 0.75
+    final_k: 4

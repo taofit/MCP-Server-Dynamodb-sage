@@ -26,6 +26,8 @@ const exampleArgs: Record<string, string> = {
   update_table_ttl: '{\n  "tableName": "Users",\n  "ttlEnabled": true\n}',
   read_audit_logs: '{\n  "limit": 20\n}',
   get_job_result: '{\n  "jobId": "your-job-id-here"\n}',
+  ingest_document: '{\n  "tableName": "Users",\n  "textField": "self_introduction"\n}',
+  search_collection: '{\n  "collectionName": "Users",\n  "query": "clean energy",\n  "limit": 5,\n  "score_threshold": 0.3\n}',
 };
 
 export default function ToolsPage() {

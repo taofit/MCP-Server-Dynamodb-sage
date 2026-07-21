@@ -3,6 +3,7 @@ package server
 import (
 	"dynamodb-sage/internal/kafka"
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -35,5 +36,12 @@ func (srv *Server) initKafkaClient(kafkaConfigPath string) error {
 	srv.kafkaClient = kafkaClient
 	srv.heavyOpsTopic = kafkaConfig.Topics["heavy_ops"]
 	srv.notificationsTopic = kafkaConfig.Topics["notifications"]
+	srv.kafkaClient.RegisterHandler(srv.heavyOpsTopic, srv.processHeavyOp)
+	srv.kafkaClient.RegisterHandler(srv.notificationsTopic, srv.processNotification)
+	go func() {
+		if err := srv.kafkaClient.Start(); err != nil {
+			log.Printf("Failed to start kafka client: %v", err)
+		}
+	}()
 	return nil
 }

@@ -47,7 +47,7 @@ resource "aws_lightsail_instance" "app" {
   availability_zone = "${var.aws_region}a"
   blueprint_id      = "ubuntu_22_04"
   bundle_id         = var.instance_plan
-  key_pair_name     = "LightsailDefaultKeyPair"
+  key_pair_name     = var.ssh_key_name
   depends_on        = [aws_iam_access_key.lightsail]
 
 
@@ -124,6 +124,21 @@ resource "aws_ssm_parameter" "llm_api_key" {
 
   tags = {
     Name = "${var.project_name}-llm-api-key"
+  }
+}
+
+resource "aws_ssm_parameter" "openai_api_key" {
+  name        = "/dynamodb-sage/openai/api-key"
+  description = "API key for OpenAI (embeddings)"
+  type        = "SecureString"
+  value       = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = {
+    Name = "${var.project_name}-openai-api-key"
   }
 }
 

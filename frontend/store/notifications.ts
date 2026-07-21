@@ -12,8 +12,9 @@ export interface Notification {
   timestamp: number;
 }
 
-export function notifId(n: Notification): string {
-  return `${n.jobId}-${n.timestamp}`;
+export function notifId(n: Notification, index?: number): string {
+  if (n.jobId) return `${n.jobId}-${n.timestamp}`;
+  return `${n.operation}-${n.table}-${n.timestamp}-${index ?? 0}`;
 }
 
 interface NotificationsState {
@@ -50,7 +51,7 @@ export const useNotificationsStore = create<NotificationsState>()(
 
       markAllAsRead: () => {
         set((state) => ({
-          readIds: state.notifications.map(notifId),
+          readIds: state.notifications.map((n, i) => notifId(n, i)),
         }));
       },
     }),

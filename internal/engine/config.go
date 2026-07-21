@@ -38,6 +38,38 @@ type AppConfig struct {
 	RiskThresholds  RiskThresholds      `yaml:"risk_thresholds"`
 	RiskLevel       RiskLevel           `yaml:"risk_level"`
 	ProtectedTags   map[string][]string `yaml:"protected_tags"`
+	Rag				RagConfig		    `yaml:"rag"`
+}
+
+type RagConfig struct {
+	Enabled   bool            `yaml:"enabled"`
+	Embedding EmBeddingConfig `yaml:"embedding"`
+	Chunking  ChunkingConfig  `yaml:"chunking"`
+	VectorDB  VectorDBConfig  `yaml:"vector_db"`
+	Retrieval RetrievalConfig `yaml:"retrieval"`
+}
+
+type ChunkingConfig struct {
+	MaxTokens int `yaml:"max_tokens"`
+	Overlap int `yaml:"overlap"`
+}
+
+type EmBeddingConfig struct {
+	Provider string `yaml:"provider"`
+	Model string `yaml:"model"`
+	Dimensions int `yaml:"dimensions"`
+}
+
+type VectorDBConfig struct {
+	Provider string `yaml:"provider"`
+	Host string `yaml:"host"`
+	Port int `yaml:"port"`
+}
+
+type RetrievalConfig struct {
+	TopK int `yaml:"top_k"`
+	ScoreThreshold float64 `yaml:"score_threshold"`
+	FinalK int `yaml:"final_k"`
 }
 
 type RiskLevel int
@@ -108,6 +140,43 @@ func LoadConfig(filename string) (*AppConfig, error) {
 		// set default protected tags if not set
 		config.ProtectedTags = DefaultProtectedTags
 	}
-
+	loadRagConfig(&config)
 	return &config, nil
+}
+
+func loadRagConfig(appConfig *AppConfig) {
+	
+	if appConfig.Rag.Embedding.Provider == "" {
+		appConfig.Rag.Embedding.Provider = "openai"
+	}
+	if appConfig.Rag.Embedding.Model == "" {
+		appConfig.Rag.Embedding.Model = "text-embedding-3-small"
+	}
+	if appConfig.Rag.Embedding.Dimensions == 0 {
+		appConfig.Rag.Embedding.Dimensions = 1536
+	}
+	if appConfig.Rag.Chunking.MaxTokens == 0 {
+		appConfig.Rag.Chunking.MaxTokens = 500
+	}
+	if appConfig.Rag.Chunking.Overlap == 0 {
+		appConfig.Rag.Chunking.Overlap = 50
+	}
+	if appConfig.Rag.VectorDB.Provider == "" {
+		appConfig.Rag.VectorDB.Provider = "openai"
+	}
+	if appConfig.Rag.VectorDB.Host == "" {
+		appConfig.Rag.VectorDB.Host = "localhost"
+	}
+	if appConfig.Rag.VectorDB.Port == 0 {
+		appConfig.Rag.VectorDB.Port = 6334
+	}
+	if appConfig.Rag.Retrieval.TopK == 0 {
+		appConfig.Rag.Retrieval.TopK = 20
+	}
+	if appConfig.Rag.Retrieval.ScoreThreshold == 0 {
+		appConfig.Rag.Retrieval.ScoreThreshold = 0.75
+	}
+	if appConfig.Rag.Retrieval.FinalK == 0 {
+		appConfig.Rag.Retrieval.FinalK = 4
+	}
 }

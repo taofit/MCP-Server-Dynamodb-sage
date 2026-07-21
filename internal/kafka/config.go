@@ -38,9 +38,6 @@ func LoadConfig(configPath string) (*KafkaConfig, error) {
 	if cfg.Topics["heavy_ops"] == "" {
 		cfg.Topics["heavy_ops"] = "dynamodb-sage-heavy-ops"
 	}
-	if cfg.Topics["audit_log"] == "" {
-		cfg.Topics["audit_log"] = "dynamodb-sage-audit-log"
-	}
 	if cfg.Topics["notifications"] == "" {
 		cfg.Topics["notifications"] = "dynamodb-sage-notifications"
 	}

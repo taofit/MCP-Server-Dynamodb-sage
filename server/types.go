@@ -156,5 +156,24 @@ type AttributeDefinition struct {
 	AttributeType string `json:"attributeType"`
 }
 
+type IngestDocumentArgs struct {
+	TableName string `json:"tableName"`
+	TextField string `json:"textField"`
+}
+
+type DocumentItem struct {
+	ID       string         `json:"id"`
+	Document string         `json:"document"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+type SearchCollectionArgs struct {
+	CollectionName string  `json:"collectionName"`
+	Query          string  `json:"query"`
+	Limit          int32   `json:"limit"`
+	Filter         string  `json:"filter"`
+	ScoreThreshold float64 `json:"score_threshold,omitempty"`
+}
+
 const batchSize = 25
 const defaultLimit = 20

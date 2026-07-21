@@ -35,7 +35,7 @@ func (srv *Server) addTools() {
 	// explicit calls per handler type (Go cannot infer type params through
 	// an any-typed variable, and ToolHandlerFor is a named type so a type
 	// switch on an any-typed value never matches).
-	register := func(name string, handler any, risk bool) {
+	register := func(name string, handler any) {
 		td := defsByName[name]
 		tool := &mcp.Tool{
 			Name:        td.Name,
@@ -55,11 +55,7 @@ func (srv *Server) addTools() {
 			wrapped := mcp.ToolHandlerFor[ScanTableArgs, any](func(ctx context.Context, req *mcp.CallToolRequest, input ScanTableArgs) (*mcp.CallToolResult, any, error) {
 				return h(ctx, req, &input)
 			})
-			if risk {
-				mcp.AddTool(srv.s, tool, instrumentMCP(srv, name, withRiskAnalysis(srv, wrapped)))
-			} else {
-				mcp.AddTool(srv.s, tool, instrumentMCP(srv, name, wrapped))
-			}
+			mcp.AddTool(srv.s, tool, instrumentMCP(srv, name, withRiskAnalysis(srv, wrapped)))
 		case func(context.Context, *mcp.CallToolRequest, *PutItemArgs) (*mcp.CallToolResult, any, error):
 			wrapped := mcp.ToolHandlerFor[PutItemArgs, any](func(ctx context.Context, req *mcp.CallToolRequest, input PutItemArgs) (*mcp.CallToolResult, any, error) {
 				return h(ctx, req, &input)
@@ -125,28 +121,41 @@ func (srv *Server) addTools() {
 			mcp.AddTool(srv.s, tool, instrumentMCP(srv, name, mcp.ToolHandlerFor[GetJobResultArgs, any](func(ctx context.Context, req *mcp.CallToolRequest, input GetJobResultArgs) (*mcp.CallToolResult, any, error) {
 				return h(ctx, req, &input)
 			})))
+		case func(context.Context, *mcp.CallToolRequest, *IngestDocumentArgs) (*mcp.CallToolResult, any, error):
+			wrapped := mcp.ToolHandlerFor[IngestDocumentArgs, any](func(ctx context.Context, req *mcp.CallToolRequest, input IngestDocumentArgs) (*mcp.CallToolResult, any, error) {
+				return h(ctx, req, &input)
+			})
+			mcp.AddTool(srv.s, tool, instrumentMCP(srv, name, withRiskAnalysis(srv, wrapped)))
+		case func(context.Context, *mcp.CallToolRequest, *SearchCollectionArgs) (*mcp.CallToolResult, any, error):
+			mcp.AddTool(srv.s, tool, instrumentMCP(srv, name, mcp.ToolHandlerFor[SearchCollectionArgs, any](func(ctx context.Context, req *mcp.CallToolRequest, input SearchCollectionArgs) (*mcp.CallToolResult, any, error) {
+				return h(ctx, req, &input)
+			})))
 		default:
 			log.Printf("WARNING: addTools: no matching type for tool %q (type %T)", name, handler)
 		}
 	}
 
-	register("list_tables", srv.listTables, false)
-	register("describe_table", srv.describeTable, false)
-	register("scan_table", srv.scanTable, true)
-	register("put_item", srv.putItem, true)
-	register("query_table", srv.queryTable, false)
-	register("get_item", srv.getItem, false)
-	register("update_item", srv.updateItem, true)
-	register("delete_item", srv.deleteItem, true)
-	register("batch_get_items", srv.batchGetItems, true)
-	register("batch_put_items", srv.batchPutItems, true)
-	register("batch_delete_items", srv.batchDeleteItems, true)
-	register("create_optimized_table", srv.createOptimizedTable, true)
-	register("delete_table", srv.deleteTable, true)
-	register("update_table", srv.updateTable, true)
-	register("update_table_ttl", srv.updateTableTTL, false)
-	register("read_audit_logs", srv.readAuditLogs, false)
-	register("get_job_result", srv.getJobResult, false)
+	register("list_tables", srv.listTables)
+	register("describe_table", srv.describeTable)
+	register("scan_table", srv.scanTable)
+	register("put_item", srv.putItem)
+	register("query_table", srv.queryTable)
+	register("get_item", srv.getItem)
+	register("update_item", srv.updateItem)
+	register("delete_item", srv.deleteItem)
+	register("batch_get_items", srv.batchGetItems)
+	register("batch_put_items", srv.batchPutItems)
+	register("batch_delete_items", srv.batchDeleteItems)
+	register("create_optimized_table", srv.createOptimizedTable)
+	register("delete_table", srv.deleteTable)
+	register("update_table", srv.updateTable)
+	register("update_table_ttl", srv.updateTableTTL)
+	register("read_audit_logs", srv.readAuditLogs)
+	register("get_job_result", srv.getJobResult)
+	if srv.rag != nil {
+		register("ingest_document", srv.ingestDocument)
+		register("search_collection", srv.searchCollection)
+	}
 
 	srv.toolList = make([]ToolInfo, len(defs))
 	for i, d := range defs {
@@ -155,26 +164,26 @@ func (srv *Server) addTools() {
 }
 
 func (srv *Server) buildToolDefs() []llm.ToolDef {
-	return []llm.ToolDef{
+	defs := []llm.ToolDef{
 		{Name: "list_tables", Description: "List all DynamoDB tables", InputSchema: map[string]any{"type": "object"}},
 		{Name: "describe_table", Description: "Get details about a DynamoDB table schema, indexes, and status", InputSchema: map[string]any{
-			"type": "object",
+			"type":       "object",
 			"properties": map[string]any{"tableName": map[string]any{"type": "string", "description": "The name of the table to describe. Example users, orders"}},
 			"required":   []string{"tableName"},
 		}},
 		{Name: "scan_table", Description: "EXPENSIVE: Scans the entire table consuming high RCU. Only use as a last resort. ALWAYS prefer query_table with a GSI index if the access pattern is known.", InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"tableName":                map[string]any{"type": "string", "description": "The name of the table to scan. Example users, orders"},
-				"filterExpression":         map[string]any{"type": "string", "description": "The filter expression for the scan. Example #attr = :val"},
-				"projectionExpression":     map[string]any{"type": "string", "description": "The projection expression for the scan"},
+				"tableName":                 map[string]any{"type": "string", "description": "The name of the table to scan. Example users, orders"},
+				"filterExpression":          map[string]any{"type": "string", "description": "The filter expression for the scan. Example #attr = :val"},
+				"projectionExpression":      map[string]any{"type": "string", "description": "The projection expression for the scan"},
 				"expressionAttributeValues": map[string]any{"type": "object", "description": "The expression attribute values for the scan"},
 				"expressionAttributeNames":  map[string]any{"type": "object", "description": "The expression attribute names for the scan"},
-				"indexName":                map[string]any{"type": "string", "description": "Optional: The name of an LSI or GSI to scan against. Omit to scan the base table."},
-				"limit":                    map[string]any{"type": "integer", "description": "The maximum number of items to return", "default": defaultLimit},
-				"exclusiveStartKey":        map[string]any{"type": "object", "description": "The exclusive start key for the scan"},
-				"consistentRead":           map[string]any{"type": "boolean", "description": "If true, a strongly consistent read is used. Default is false (eventually consistent). Consistent reads consume more capacity units.", "default": false},
-				"confirmation":             map[string]any{"type": "boolean", "description": "Please consider the warning carefully and then set to true to confirm the scan operation", "default": false},
+				"indexName":                 map[string]any{"type": "string", "description": "Optional: The name of an LSI or GSI to scan against. Omit to scan the base table."},
+				"limit":                     map[string]any{"type": "integer", "description": "The maximum number of items to return", "default": defaultLimit},
+				"exclusiveStartKey":         map[string]any{"type": "object", "description": "The exclusive start key for the scan"},
+				"consistentRead":            map[string]any{"type": "boolean", "description": "If true, a strongly consistent read is used. Default is false (eventually consistent). Consistent reads consume more capacity units.", "default": false},
+				"confirmation":              map[string]any{"type": "boolean", "description": "Please consider the warning carefully and then set to true to confirm the scan operation", "default": false},
 			},
 			"required": []string{"tableName"},
 		}},
@@ -198,14 +207,14 @@ func (srv *Server) buildToolDefs() []llm.ToolDef {
 		keyConditionExpression: "#id = :id"`, InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"tableName":                map[string]any{"type": "string", "description": "The name of the table to query. Example users, orders"},
-				"indexName":                map[string]any{"type": "string", "description": "Optional: The name of an LSI or GSI to query against. Omit to query the base table."},
-				"keyConditionExpression":   map[string]any{"type": "string", "description": "The condition expression for the query. Must include the partition key. Optionally include the sort key with AND. Example: \"#pk = :pkVal AND #sk = :skVal\""},
+				"tableName":                 map[string]any{"type": "string", "description": "The name of the table to query. Example users, orders"},
+				"indexName":                 map[string]any{"type": "string", "description": "Optional: The name of an LSI or GSI to query against. Omit to query the base table."},
+				"keyConditionExpression":    map[string]any{"type": "string", "description": "The condition expression for the query. Must include the partition key. Optionally include the sort key with AND. Example: \"#pk = :pkVal AND #sk = :skVal\""},
 				"expressionAttributeValues": map[string]any{"type": "object", "description": "The expression attribute values for the query. Values must match the key attribute types (Number vs String). Example: {\":pkVal\": 1, \":skVal\": \"matt\"}"},
 				"expressionAttributeNames":  map[string]any{"type": "object", "description": "The expression attribute names for the query. Maps placeholders to real attribute names. Example: {\"#pk\": \"id\", \"#sk\": \"name\"}"},
-				"limit":                    map[string]any{"type": "integer", "description": "The maximum number of items to return", "default": defaultLimit},
-				"exclusiveStartKey":        map[string]any{"type": "object", "description": "The exclusive start key for the query(pagination parameter)"},
-				"consistentRead":           map[string]any{"type": "boolean", "description": "If true, a strongly consistent read is used. Default is false (eventually consistent). Consistent reads consume more capacity units.", "default": false},
+				"limit":                     map[string]any{"type": "integer", "description": "The maximum number of items to return", "default": defaultLimit},
+				"exclusiveStartKey":         map[string]any{"type": "object", "description": "The exclusive start key for the query(pagination parameter)"},
+				"consistentRead":            map[string]any{"type": "boolean", "description": "If true, a strongly consistent read is used. Default is false (eventually consistent). Consistent reads consume more capacity units.", "default": false},
 			},
 			"required": []string{"tableName", "keyConditionExpression", "expressionAttributeValues"},
 		}},
@@ -229,14 +238,14 @@ func (srv *Server) buildToolDefs() []llm.ToolDef {
 		{Name: "update_item", Description: "Update an item in the table using primary key", InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"tableName":                map[string]any{"type": "string", "description": "The name of the table to update an item from. Example users, orders"},
-				"key":                      map[string]any{"type": "object", "description": "The primary key of the item to update as a plain JSON object. Example {\"id\": 1, \"name\": \"Reggie\"}"},
-				"updateExpression":         map[string]any{"type": "string", "description": "The update expression. Example SET #attr = :val"},
+				"tableName":                 map[string]any{"type": "string", "description": "The name of the table to update an item from. Example users, orders"},
+				"key":                       map[string]any{"type": "object", "description": "The primary key of the item to update as a plain JSON object. Example {\"id\": 1, \"name\": \"Reggie\"}"},
+				"updateExpression":          map[string]any{"type": "string", "description": "The update expression. Example SET #attr = :val"},
 				"expressionAttributeNames":  map[string]any{"type": "object", "description": "the expression attribute names for the update. Example {\":attr\": \"attribute_name\"}"},
 				"expressionAttributeValues": map[string]any{"type": "object", "description": "the expression attribute values for the update. Example {\":val\":{\"S\":\"active\"}}"},
-				"conditionExpression":      map[string]any{"type": "string", "description": "An optional condition to evaluate before updating. Example attribute_exists(#attr)"},
-				"returnValues":             map[string]any{"type": "string", "description": "The return values for the update. Choose from NONE, ALL_OLD, ALL_NEW, UPDATED_OLD, UPDATED_NEW"},
-				"confirmation":             map[string]any{"type": "boolean", "description": "Please consider the warning carefully and then set to true to confirm the update operation", "default": false},
+				"conditionExpression":       map[string]any{"type": "string", "description": "An optional condition to evaluate before updating. Example attribute_exists(#attr)"},
+				"returnValues":              map[string]any{"type": "string", "description": "The return values for the update. Choose from NONE, ALL_OLD, ALL_NEW, UPDATED_OLD, UPDATED_NEW"},
+				"confirmation":              map[string]any{"type": "boolean", "description": "Please consider the warning carefully and then set to true to confirm the update operation", "default": false},
 			},
 			"required": []string{"tableName", "key", "updateExpression"},
 		}},
@@ -338,9 +347,9 @@ func (srv *Server) buildToolDefs() []llm.ToolDef {
 		{Name: "update_table_ttl", Description: "Update a table's time to live", InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"tableName":    map[string]any{"type": "string", "description": "The name of the table to update"},
+				"tableName":     map[string]any{"type": "string", "description": "The name of the table to update"},
 				"attributeName": map[string]any{"type": "string", "description": "The name of the attribute to set as TTL"},
-				"enabled":      map[string]any{"type": "boolean", "description": "Enable or disable TTL"},
+				"enabled":       map[string]any{"type": "boolean", "description": "Enable or disable TTL"},
 			},
 			"required": []string{"tableName", "enabled", "attributeName"},
 		}},
@@ -361,6 +370,30 @@ func (srv *Server) buildToolDefs() []llm.ToolDef {
 			"required": []string{"jobId"},
 		}},
 	}
+
+	if srv.rag != nil {
+		defs = append(defs, llm.ToolDef{Name: "ingest_document", Description: "Scan a DynamoDB table, chunk text fields, embed them via OpenAI, and store in Qdrant for semantic search", InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tableName": map[string]any{"type": "string", "description": "The name of the table(collection) to ingest documents from"},
+				"textField": map[string]any{"type": "string", "description": "The name of the attribute containing the text to embed"},
+			},
+			"required": []string{"tableName", "textField"},
+		}})
+		defs = append(defs, llm.ToolDef{Name: "search_collection", Description: "Search for documents in a collection by vector similarity. Use score_threshold to control match strictness: 0.7+ for exact/specific matches, 0.5-0.7 for moderate relevance, 0.3-0.5 for broad/explore queries. Omit to use the default threshold (0.75).", InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"collectionName": map[string]any{"type": "string", "description": "The name of the collection to search in"},
+				"query":          map[string]any{"type": "string", "description": "The query to search for"},
+				"limit":          map[string]any{"type": "integer", "description": "The limit of documents to return"},
+				"filter":         map[string]any{"type": "string", "description": "The filter to apply to the search"},
+				"score_threshold": map[string]any{"type": "number", "description": "Minimum similarity score (0-1). Higher = stricter matching. Use 0.3-0.5 for broad searches, 0.5-0.7 for moderate, 0.7+ for exact. Omit to use default (0.75)."},
+			},
+			"required": []string{"collectionName", "query", "limit"},
+		}})
+	}
+
+	return defs
 }
 
 func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
@@ -522,7 +555,7 @@ func (srv *Server) ConvertToMap(input any) (map[string]any, error) {
 
 func (srv *Server) isLargeOperation(req *mcp.CallToolRequest) bool {
 	switch req.Params.Name {
-	case "create_optimized_table", "batch_put_items", "batch_delete_items":
+	case "create_optimized_table", "batch_put_items", "batch_delete_items", "ingest_document":
 		return true
 	default:
 		return false
