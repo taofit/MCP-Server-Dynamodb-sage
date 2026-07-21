@@ -15,7 +15,7 @@ import { Logo } from "./Logo";
 
 const navItems = [
   { href: "/", label: "Chat", icon: MessageSquare },
-  { href: "/chat/", label: "Overview", icon: LayoutDashboard },
+  { href: "/overview/", label: "Overview", icon: LayoutDashboard },
   { href: "/tables/", label: "Tables", icon: Database },
   { href: "/activity/", label: "Activity", icon: Activity },
   { href: "/monitoring/", label: "Monitoring", icon: BarChart3 },

@@ -8,10 +8,11 @@ import (
 	"dynamodb-sage/internal/llm"
 	"dynamodb-sage/internal/notification"
 	"dynamodb-sage/internal/queue"
+	"dynamodb-sage/internal/rag"
 	"dynamodb-sage/internal/risk"
 	"encoding/json"
-	"iter"
 	"io/fs"
+	"iter"
 	"log"
 	"net/http"
 	"os"
@@ -52,7 +53,6 @@ type Server struct {
 	heavyOpsTopic       string
 	notificationsTopic  string
 	notificationService *notification.NotificationService
-	notifMu             sync.Mutex
 	sseClients          sync.Map
 	notificationDedup   sync.Map
 	metricsAddr         string
@@ -62,6 +62,7 @@ type Server struct {
 	rateLimiter         *rate.Limiter
 	connCount           atomic.Int64
 	startTime           time.Time
+	rag                 *rag.RagPipeline
 }
 
 type ToolInfo struct {
@@ -91,15 +92,20 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
-	guardrail := engine.NewGuardrail(config)
-	riskAnalyzer := risk.NewRiskAnalyzer(config, &risk.DynamoAdapter{Client: db}, guardrail)
-	auditLog, err := audit.NewAuditLog(dbPath)
-	if err != nil {
-		log.Fatalf("Failed to create audit log: %v", err)
-	}
 	store, err := NewStore(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to create store: %v", err)
+	}
+	guardrail := engine.NewGuardrail(config)
+	riskAnalyzer := risk.NewRiskAnalyzer(config, &risk.DynamoAdapter{Client: db}, guardrail)
+	auditLog, err := audit.NewAuditLog(store.GetDB())
+	if err != nil {
+		log.Fatalf("Failed to create audit log: %v", err)
+	}
+
+	rag, err := rag.NewRagPipeline(config.Rag)
+	if err != nil {
+		log.Printf("Rag is unavailable: %v", err)
 	}
 	srv := &Server{
 		db:           db,
@@ -112,6 +118,7 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 		riskAnalyzer: riskAnalyzer,
 		metricsAddr:  metricsAddr,
 		startTime:    time.Now(),
+		rag:          rag,
 	}
 
 	rps := 5.0
@@ -130,14 +137,8 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 	if err := srv.initKafkaClient(kafkaConfigPath); err != nil {
 		srv.startWorkerPool()
 		log.Printf("In-process queue started: %v", err)
-	} else {
-		srv.kafkaClient.RegisterHandler(srv.heavyOpsTopic, srv.processHeavyOp)
-		srv.kafkaClient.RegisterHandler(srv.notificationsTopic, srv.processNotification)
-		go func() {
-			if err := srv.kafkaClient.Start(); err != nil {
-				log.Printf("Failed to start kafka client: %v", err)
-			}
-		}()
+	}
+	if srv.kafkaClient != nil {
 		srv.notificationService = notification.NewNotificationService(srv.kafkaClient, srv.notificationsTopic, srv)
 	}
 	srv.mcpCtx, srv.mcpCancel = context.WithCancel(context.Background())
@@ -165,7 +166,11 @@ func (srv *Server) HTTPHandler() http.Handler {
 	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := os.Getenv("CORS_ORIGIN")
+		if origin == "" {
+			origin = "*"
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version")
 		w.Header().Set("Access-Control-Expose-Headers", "Content-Type")
@@ -185,7 +190,7 @@ func (srv *Server) HTTPHandler() http.Handler {
 			return
 		}
 
-			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
 			// Serve Next.js static assets
 			if strings.HasPrefix(r.URL.Path, "/_next/") {
 				staticFileServer().ServeHTTP(w, r)
@@ -361,5 +366,9 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 	if srv.kafkaClient != nil {
 		srv.kafkaClient.Close()
 	}
+	if srv.store != nil {
+		srv.store.Close()
+	}
+
 	return nil
 }

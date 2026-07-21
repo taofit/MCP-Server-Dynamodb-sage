@@ -3,20 +3,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { Search, ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useNotificationsStore, type Notification } from "@/store/notifications";
 
 const timeRanges = ["Today", "This Week", "All"] as const;
-
-interface Notification {
-  title: string;
-  jobId: string;
-  table: string;
-  severity: string;
-  operation: string;
-  message: string;
-  inputHash: string;
-  timestamp: number;
-}
 
 const statusIcon: Record<string, React.ReactNode> = {
   success: <CheckCircle className="w-4 h-4 text-emerald-500" />,
@@ -47,30 +36,29 @@ export default function ActivityPage() {
   const [range, setRange] = useState<(typeof timeRanges)[number]>("Today");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const notifications = useNotificationsStore((s) => s.notifications);
+  const fetchNotifications = useNotificationsStore((s) => s.fetchNotifications);
 
   useEffect(() => {
-    fetch("/api/notifications")
-      .then((r) => r.json())
-      .then((data: Notification[]) => {
-        setNotifications(data);
-        const groups = data.reduce<Record<string, number>>((acc, n) => {
-          acc[n.table] = (acc[n.table] || 0) + 1;
-          return acc;
-        }, {});
-        const initialExpanded: Record<string, boolean> = {};
-        Object.keys(groups).slice(0, 3).forEach((k) => {
-          initialExpanded[k] = true;
-        });
-        setExpanded(initialExpanded);
-      })
-      .catch(() => setNotifications([]))
-      .finally(() => setLoading(false));
-  }, []);
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 5000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  useEffect(() => {
+    const groups = (notifications ?? []).reduce<Record<string, number>>((acc, n) => {
+      acc[n.table] = (acc[n.table] || 0) + 1;
+      return acc;
+    }, {});
+    const initialExpanded: Record<string, boolean> = {};
+    Object.keys(groups).slice(0, 3).forEach((k) => {
+      initialExpanded[k] = true;
+    });
+    setExpanded(initialExpanded);
+  }, [notifications]);
 
   const filtered = useMemo(() => {
-    return notifications.filter((n) => {
+    return (notifications ?? []).filter((n) => {
       if (range === "Today") return isToday(n.timestamp);
       if (range === "This Week") return isThisWeek(n.timestamp);
       return true;
@@ -117,38 +105,8 @@ export default function ActivityPage() {
         </p>
       </div>
 
-      {loading ? (
-        <>
-          {/* Filters skeleton */}
-          <div className="flex items-center gap-4">
-            <Skeleton className="w-48 h-9 rounded-lg" />
-            <Skeleton className="flex-1 max-w-xs h-9 rounded-lg" />
-          </div>
-
-          {/* Summary Cards skeleton */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-border bg-card/50 p-4">
-                <Skeleton className="w-20 h-3 mb-3" />
-                <Skeleton className="w-16 h-7" />
-              </div>
-            ))}
-          </div>
-
-          {/* Groups skeleton */}
-          <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-border bg-card/50 p-4">
-                <div className="flex items-center gap-3">
-                  <Skeleton className="w-4 h-4 rounded" />
-                  <Skeleton className="w-12 h-3" />
-                  <Skeleton className="w-24 h-4" />
-                  <Skeleton className="w-12 h-5 rounded-full" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
+      {(notifications ?? []).length === 0 ? (
+        <div className="text-center text-muted-foreground py-8">No activity yet. Perform a DynamoDB operation to see it here.</div>
       ) : (
         <>
           {/* Filters */}
@@ -203,7 +161,7 @@ export default function ActivityPage() {
 
           {/* Groups */}
           {groups.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">No activity found</div>
+            <div className="text-center text-muted-foreground py-8">No activity found for this time range.</div>
           ) : (
             <div className="space-y-2">
               {groups.map((group) => (

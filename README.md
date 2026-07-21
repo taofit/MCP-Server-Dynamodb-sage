@@ -165,17 +165,107 @@ The dashboard includes a built-in **AI chat assistant** powered by Claude. Descr
 - *"Query the orders table where userId = 123"*
 - *"How many items are in each table?"*
 
-**Environment variables:**
+> LLM settings are configured via environment variables (see `.env`). At least one of `LLM_API_KEY` or a valid SSM parameter must be available for chat to work.
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `LLM_API_KEY` | No | — | Anthropic API key (`sk-ant-...`). Falls back to SSM via `LLM_API_KEY_PARAM` |
-| `LLM_API_KEY_PARAM` | No | `/dynamodb-sage/claude/api-key` | SSM parameter path for API key |
-| `LLM_MODEL` | No | `claude-sonnet-5` | Model to use |
-| `LLM_BASE_URL` | No | `https://api.anthropic.com` | API base URL (for proxies) |
-| `LLM_TIMEOUT_SEC` | No | `30` | Request timeout in seconds |
+</details>
 
-> At least one of `LLM_API_KEY` or a valid SSM parameter must be available for chat to work.
+---
+
+<details>
+<summary><strong>RAG (Retrieval-Augmented Generation)</strong></summary>
+
+DynamoDB-Sage includes a built-in RAG pipeline that turns your DynamoDB tables into a searchable semantic knowledge base. Scan a table, chunk the text, embed it via OpenAI, and store the vectors in Qdrant — then search across all your data with natural language queries.
+
+#### How It Works
+
+**Ingestion Flow:**
+
+```
+MCP Client calls ingest_document(table, textField)
+        │
+        ▼
+┌──────────────────────────┐
+│  1. Ensure Qdrant        │   Create collection (Cosine distance)
+│     collection exists    │   if not already present
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│  2. DynamoDB Scan        │   Paginated full-table scan
+│     (with ExclusiveStart │   extracts primary key + text field
+│      Key pagination)     │   from each item
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│  3. Chunk                │   Word-level sliding window
+│     (500 words, 50       │   with overlap so no semantic
+│      word overlap)       │   boundary is lost at edges
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│  4. Embed                │   OpenAI text-embedding-3-small
+│     (EmbedBatch API)     │   → 1536-dimension vectors
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│  5. Upsert to Qdrant     │   Points stored with:
+│     (gRPC :6334)         │   • SHA-256 ID (docID + chunkIndex)
+│                          │   • float32 vector
+│                          │   • payload: {chunk, source, document}
+└──────────────────────────┘
+```
+
+**Search Flow:**
+
+```
+MCP Client calls search_collection(collection, query, limit)
+        │
+        ▼
+┌──────────────────────────┐
+│  1. Embed query          │   Single text → 1536-dim vector
+│     via OpenAI           │   via text-embedding-3-small
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│  2. Qdrant cosine        │   top-K=20 most similar vectors
+│     similarity search    │   using cosine distance
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│  3. Score threshold      │   Discard results below 0.75
+│     filter               │   confidence score
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│  4. Return top-K         │   Final 4 results with
+│     (finalK=4)           │   chunk text, document ID, score
+└──────────────────────────┘
+```
+
+#### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `ingest_document` | Scan a DynamoDB table, chunk text fields, embed via OpenAI, store in Qdrant |
+| `search_collection` | Search a collection by vector similarity with optional filter |
+
+**Example: ingest and search**
+
+```bash
+# Ingest the "Users" table, using the "bio" field as the text
+ingest_document(tableName="Users", textField="bio")
+
+# Search for similar documents
+search_collection(collectionName="Users", query="machine learning experience", limit=5)
+```
+
+> RAG tools are only registered if `rag.enabled: true` in `config.yaml` and Qdrant is reachable. If initialization fails, the server runs normally without RAG tools (graceful degradation). See `config.yaml` for embedding model, chunking, and retrieval settings.
 
 </details>
 
@@ -302,21 +392,6 @@ git tag v1.0.0 && git push origin v1.0.0
 ```
 
 No tags → falls back to commit hash → `"dev"`. Set `VERSION=...` to override.
-
-#### Production architecture
-
-| Component | Detail |
-|-----------|--------|
-| Region | `eu-north-1` |
-| Compute | Lightsail (Ubuntu 22.04, 2 vCPU, 1 GiB RAM, 20 GB SSD) |
-| App | Go binary in Docker (pre-built locally) |
-| Queue | Apache Kafka + Zookeeper in Docker |
-| LLM | Anthropic Claude via SSM parameter |
-| Port | 8080 |
-| Transport | Streamable HTTP (`POST /`) + SSE (`GET /sse`) |
-| HTTPS | Let's Encrypt via certbot + nginx |
-| IAM | `AmazonDynamoDBFullAccess` + `AmazonSSMReadOnlyAccess` |
-| Logs | `sudo docker compose logs app` |
 
 </details>
 

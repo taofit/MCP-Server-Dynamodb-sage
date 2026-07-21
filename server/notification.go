@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func (srv *Server) isDuplicateNotification(notf notification.NotificationPayload) bool {
@@ -60,6 +62,7 @@ func (srv *Server) broadcastToSSE(notf notification.NotificationPayload) {
 func (srv *Server) recordNotification(table, operation, severity, message string) {
 	notf := notification.NotificationPayload{
 		Title:     fmt.Sprintf("%s on %s", operation, table),
+		JobID:     uuid.New().String(),
 		Table:     table,
 		Severity:  severity,
 		Operation: operation,

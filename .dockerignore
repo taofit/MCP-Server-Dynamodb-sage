@@ -1,0 +1,12 @@
+.git
+.env
+keys/
+data/
+terraform/
+frontend/.next/
+frontend/node_modules/
+*.md
+*.tar.gz
+.gopls.toml
+.vscode/
+opencode.json

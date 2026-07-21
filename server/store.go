@@ -19,6 +19,8 @@ type ChatMessage struct {
 	Timestamp int64
 }
 
+const maxNotifications = 100
+
 func NewStore(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -58,7 +60,9 @@ func NewStore(dbPath string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-const maxNotifications = 100
+func (s *Store) GetDB() *sql.DB {
+	return s.db
+}
 
 func (s *Store) AddNotification(n notification.NotificationPayload) error {
 	title := n.Operation
@@ -74,7 +78,7 @@ func (s *Store) AddNotification(n notification.NotificationPayload) error {
 }
 
 func (s *Store) GetNotifications() ([]notification.NotificationPayload, error) {
-	rows, err := s.db.Query(`SELECT title, job_id, table_name, severity, operation, message, timestamp FROM notifications ORDER BY timestamp DESC`)
+	rows, err := s.db.Query(`SELECT title, COALESCE(job_id, ''), COALESCE(table_name, ''), COALESCE(severity, ''), COALESCE(operation, ''), COALESCE(message, ''), COALESCE(timestamp, 0) FROM notifications ORDER BY timestamp DESC`)
 	if err != nil {
 		return nil, err
 	}

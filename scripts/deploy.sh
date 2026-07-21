@@ -77,7 +77,7 @@ echo "=== Step 5: Create deployment tarball ==="
 rm -rf "$DEPLOY_DIR" "$TARBALL"
 mkdir -p "$DEPLOY_DIR"
 # Copy project files (excluding heavy/unnecessary dirs)
-rsync -a --exclude='.git' --exclude='keys' --exclude='data' --exclude='terraform' --exclude='*.tar.gz' --exclude='dynamo-sage' "$DIR/" "$DEPLOY_DIR/"
+rsync -a --exclude='.git' --exclude='keys' --exclude='data' --exclude='terraform' --exclude='*.tar.gz' --exclude='dynamo-sage' --exclude='dynamodb-sage' --exclude='*.md' --exclude='.gopls.toml' --exclude='opencode.json' --exclude='.vscode' "$DIR/" "$DEPLOY_DIR/"
 # Add pre-built binary and release Dockerfile
 cp "/tmp/${APP_NAME}" "$DEPLOY_DIR/${APP_NAME}"
 cp "$DIR/Dockerfile.release" "$DEPLOY_DIR/Dockerfile"
@@ -109,6 +109,10 @@ LLM_API_KEY=
 LLM_MODEL=claude-sonnet-5
 LLM_TIMEOUT_SEC=30
 LLM_BASE_URL=
+OPENAI_API_KEY_PARAM=/dynamodb-sage/openai/api-key
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.openai.com/v1
+CORS_ORIGIN=https://dynamodb-sage.hzcentre.com
 ENVEOF"
 
 echo ""

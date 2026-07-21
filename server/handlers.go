@@ -1102,7 +1102,10 @@ func (srv *Server) getJobResult(ctx context.Context, req *mcp.CallToolRequest, a
 	if !ok {
 		return srv.errorResult(fmt.Sprintf("Job %s not found", args.JobID)), nil, nil
 	}
-	jr := jobResult.(*JobResult)
+	jr, ok := jobResult.(*JobResult)
+	if !ok {
+		return srv.errorResult(fmt.Sprintf("Job %s is not a JobResult", args.JobID)), nil, nil
+	}
 	select {
 	case <-ctx.Done():
 		return srv.errorResult("Context cancelled"), nil, nil
@@ -1112,6 +1115,103 @@ func (srv *Server) getJobResult(ctx context.Context, req *mcp.CallToolRequest, a
 		}
 		return jr.Result, nil, nil
 	}
+}
+
+func (srv *Server) ingestDocument(ctx context.Context, req *mcp.CallToolRequest, args *IngestDocumentArgs) (*mcp.CallToolResult, any, error) {
+	err := srv.rag.EnsureCollection(ctx, args.TableName)
+	if err != nil {
+		return srv.errorResult(fmt.Sprintf("Error while ensuring collection %s: %v", args.TableName, err)), nil, nil
+	}
+	var totalCount int64
+	input := &dynamodb.ScanInput{
+		TableName:              &args.TableName,
+		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
+	}
+	des, err := srv.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+		TableName: &args.TableName,
+	})
+	if err != nil {
+		return srv.errorResult(fmt.Sprintf("DescribeTable %s failed: %v", args.TableName, err)), nil, nil
+	}
+	pkName := getPrimaryKey(des)
+	
+	for {
+		result, err := instrumentDynamoDB("scan_table", args.TableName, func() (*dynamodb.ScanOutput, error) {
+			return srv.db.Scan(ctx, input)
+		})
+		if err != nil {
+			srv.sendAuditLog("scan_table", args.TableName, "", nil, err)
+			return srv.errorResult(fmt.Sprintf("Scan %s failed: %v", args.TableName, err)), nil, nil
+		}
+		for _, item := range result.Items {
+			docID, text, skip := getItemKV(*args, pkName, item)
+			if skip {
+				continue
+			}
+			err = srv.rag.ProcessDocument(ctx, args.TableName, docID, args.TextField, text)
+			if err != nil {
+				return srv.errorResult(fmt.Sprintf("ProcessDocument %s failed: %v", args.TableName, err)), nil, nil
+			}
+			totalCount++
+		}
+		if result.LastEvaluatedKey == nil {
+			break
+		}
+		input.ExclusiveStartKey = result.LastEvaluatedKey
+	}
+
+	return srv.successResult(fmt.Sprintf("Successfully ingested %d documents from table %s", totalCount, args.TableName)), nil, nil
+}
+
+func getItemKV(args IngestDocumentArgs, pkName string, item map[string]types.AttributeValue) (string, string, bool) {
+	docID := getPrimaryKeyValue(item, pkName)
+	if docID == "" {
+		return "", "", true
+	}
+	textVal, ok := item[args.TextField].(*types.AttributeValueMemberS)
+	if !ok {
+		return "", "", true
+	}
+	return docID, textVal.Value, textVal.Value == ""
+}
+
+func getPrimaryKeyValue(item map[string]types.AttributeValue, pkName string) string {
+	var docID string
+	if pk := item[pkName]; pk != nil {
+		switch v := pk.(type) {
+		case *types.AttributeValueMemberS:
+			docID = v.Value
+		case *types.AttributeValueMemberN:
+			docID = v.Value
+		}
+	}
+	return docID
+}
+
+func getPrimaryKey(des *dynamodb.DescribeTableOutput) string {
+	for _, v := range des.Table.KeySchema {
+		if v.KeyType == types.KeyTypeHash {
+			return *v.AttributeName
+		}
+	}
+
+	return ""
+}
+
+func (srv *Server) searchCollection(ctx context.Context, req *mcp.CallToolRequest, args *SearchCollectionArgs) (*mcp.CallToolResult, any, error) {
+	limit := int(args.Limit)
+	results, err := srv.rag.Search(ctx, args.CollectionName, args.Query, args.Filter, limit, args.ScoreThreshold, 0)
+	if err != nil {
+		return srv.errorResult(fmt.Sprintf("Search %s failed: %v", args.CollectionName, err)), nil, nil
+	}
+	if len(results) == 0 {
+		return srv.successResult("No relevant documents found"), nil, nil
+	}
+	var sb strings.Builder
+	for i, r := range results {
+		sb.WriteString(fmt.Sprintf("#%d (score: %.3f, document: %s)\n%s\n\n", i+1, r.Score, r.Document, r.Chunk))
+	}
+	return srv.successResult(sb.String()), nil, nil
 }
 
 // readAuditLogs does not call sendAuditLog, so no change needed here.
@@ -1387,7 +1487,7 @@ func (srv *Server) validateProtectedTag(ctx context.Context, tableName string) e
 func (srv *Server) processHeavyOp(key string, payload []byte) error {
 	payloadResult, err := srv.notificationService.ParsePayload(payload)
 	if err != nil {
-		srv.notificationService.SendNotification("unknown", "error", "", "", err.Error())
+		srv.notificationService.SendNotification("unknown", "error", "unknown_operation", "", err.Error())
 		return err
 	}
 	jobResult, ok := srv.jobStorage.Load(key)
@@ -1396,11 +1496,14 @@ func (srv *Server) processHeavyOp(key string, payload []byte) error {
 		return nil
 	}
 
-	jr := jobResult.(*JobResult)
+	jr, ok := jobResult.(*JobResult)
+	if !ok {
+		return fmt.Errorf("job %s is not a JobResult", key)
+	}
 	srv.executeJobOp(jr, payload)
 
 	if jr.Error != nil {
-		srv.notificationService.SendNotification(payloadResult.TableName, "error", "", "", jr.Error.Error())
+		srv.notificationService.SendNotification(payloadResult.TableName, "error", payloadResult.Operation, payloadResult.InputHash, jr.Error.Error())
 		return jr.Error
 	}
 	srv.notificationService.SendNotification(payloadResult.TableName, "success", payloadResult.Operation, payloadResult.InputHash, srv.notificationService.ConstructMessage(payloadResult))
@@ -1413,7 +1516,10 @@ func (srv *Server) processHeavyOpForQueue(key string, payload []byte) error {
 	if !ok {
 		return fmt.Errorf("job not found: %s", key)
 	}
-	jr := jobResult.(*JobResult)
+	jr, ok := jobResult.(*JobResult)
+	if !ok {
+		return fmt.Errorf("job %s is not a JobResult", key)
+	}
 
 	jobPayload := struct {
 		Input     json.RawMessage `json:"input"`
@@ -1427,7 +1533,11 @@ func (srv *Server) processHeavyOpForQueue(key string, payload []byte) error {
 
 	// Extract table name from input
 	var tableName struct{ TableName string }
-	json.Unmarshal(jobPayload.Input, &tableName)
+	if err := json.Unmarshal(jobPayload.Input, &tableName); err != nil {
+		jr.Error = fmt.Errorf("failed to extract table name from input: %v", err)
+		srv.recordNotification("unknown", jobPayload.Operation, "error", jr.Error.Error())
+		return jr.Error
+	}
 
 	srv.executeJobOp(jr, payload)
 
@@ -1492,6 +1602,18 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 			result, _, err := srv.createOptimizedTable(ctx, req, &input)
 			if err != nil {
 				jr.Error = fmt.Errorf("failed to execute create_optimized_table: %v", err)
+			} else {
+				jr.Result = result
+			}
+		}
+	case "ingest_document":
+		var input IngestDocumentArgs
+		if err := json.Unmarshal(jobPayload.Input, &input); err != nil {
+			jr.Error = fmt.Errorf("failed to parse ingest_document args: %v", err)
+		} else {
+			result, _, err := srv.ingestDocument(ctx, req, &input)
+			if err != nil {
+				jr.Error = fmt.Errorf("failed to execute ingest_document: %v", err)
 			} else {
 				jr.Result = result
 			}

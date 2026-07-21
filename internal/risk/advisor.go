@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -21,6 +22,7 @@ type ScanTracker struct {
 	Count      int
 	LastSeen   time.Time
 	Expression string
+	Mutex      sync.RWMutex
 }
 
 type TTLHandlerFunc func(input GetItemArgs) bool
@@ -106,13 +108,16 @@ func (ra *RiskAnalyzer) validatMultipleScan(tableName, filterExp string) string 
 	fingerprint := hex.EncodeToString(hasher.Sum(nil))
 
 	tracker, _ := ra.scanHistory.LoadOrStore(fingerprint, &ScanTracker{
-		Count:      0,
-		LastSeen:   time.Now(),
 		Expression: filterExp,
 	})
-	t := tracker.(*ScanTracker)
+	t, ok := tracker.(*ScanTracker)
+	if !ok {
+		return ""
+	}
+	t.Mutex.Lock()
 	t.Count++
 	t.LastSeen = time.Now()
+	t.Mutex.Unlock()
 	if t.Count > 3 {
 		return fmt.Sprintf(
 			"⚠️ SCAN WARNING: '%s' is being scanned frequently. This may be a sign of an inefficient query pattern. Consider using a Secondary Index to optimize this query.",

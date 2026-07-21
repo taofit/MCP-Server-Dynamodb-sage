@@ -50,7 +50,7 @@ export function NotificationBell() {
   }, [fetchNotifications]);
 
   const unreadCount = (notifications ?? []).filter(
-    (n) => !readIds.includes(notifId(n))
+    (n, i) => !readIds.includes(notifId(n, i))
   ).length;
 
   const recent = (notifications ?? []).slice(0, MAX_DISPLAYED);
@@ -94,8 +94,8 @@ export function NotificationBell() {
             No notifications
           </div>
         ) : (
-          recent.map((n) => {
-            const id = notifId(n);
+          recent.map((n, i) => {
+            const id = notifId(n, i);
             const read = readIds.includes(id);
             return (
               <DropdownMenuItem

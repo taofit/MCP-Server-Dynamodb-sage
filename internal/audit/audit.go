@@ -25,12 +25,7 @@ type AuditLog struct {
 	db        *sql.DB
 }
 
-func NewAuditLog(dbPath string) (*AuditLog, error) {
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, err
-	}
-
+func NewAuditLog(db *sql.DB) (*AuditLog, error) {
 	query := `CREATE TABLE IF NOT EXISTS audit_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		timestamp INTEGER NOT NULL,

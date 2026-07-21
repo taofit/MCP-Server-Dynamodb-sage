@@ -59,6 +59,13 @@ echo "✓ Scan complete!"
 # ----------------------------------------------------------------
 # SETUP SSM PARAMETERS (run once per container start)
 awslocal --endpoint-url=http://localhost:4566 ssm put-parameter \
+    --name /dynamodb-sage/claude/api-key \
+    --value "sk-your-anthropic-api-key-here" \
+    --type SecureString \
+    --key-id alias/aws/ssm \
+    --overwrite
+
+awslocal --endpoint-url=http://localhost:4566 ssm put-parameter \
     --name /dynamodb-sage/openai/api-key \
     --value "sk-your-openai-api-key-here" \
     --type SecureString \
