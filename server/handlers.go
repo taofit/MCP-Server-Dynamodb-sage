@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"dynamodb-sage/internal/audit"
+	"dynamodb-sage/internal/crypto"
 	"dynamodb-sage/internal/metrics"
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -114,6 +116,10 @@ func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *
 	if len(args.Item) == 0 {
 		return srv.errorResult(fmt.Sprintf("Item to put into table %s cannot be empty", args.TableName)), nil, nil
 	}
+	result, a, err, shouldReturn := srv.hashPasswordInItem(args.Item)
+	if shouldReturn {
+		return result, a, err
+	}
 	// Convert the plain Go map into a map of DynamoDB AttributeValues
 	av, err := attributevalue.MarshalMap(args.Item)
 	if err != nil {
@@ -143,6 +149,36 @@ func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *
 
 	srv.recordNotification(args.TableName, "put_item", "success", "Item put successfully")
 	return srv.successResult(fmt.Sprintf("Successfully put item into table %s", args.TableName)), nil, nil
+}
+
+func (srv *Server) hashPasswordInItem(item map[string]any) (*mcp.CallToolResult, any, error, bool) {
+	if !srv.guardrail.Config.EnforcePasswordHashing {
+		return nil, nil, nil, false
+	}
+	found := false
+	passwordField := ""
+	for field, _ := range item {
+		if strings.EqualFold(field, "password") {
+			found = true
+			passwordField = field
+			break
+		}
+	}
+	if !found {
+		return nil, nil, nil, false
+	}
+	passwordValue := item[passwordField]
+	passwordStr, ok := passwordValue.(string)
+	if !ok {
+		return srv.errorResult("Password must be a string"), nil, nil, true
+	}
+	hashed, err := crypto.HashPassword(passwordStr)
+	if err != nil {
+		return srv.errorResult(fmt.Sprintf("Error when hashing password: %v", err)), nil, nil, true
+	}
+	item[passwordField] = hashed
+
+	return nil, nil, nil, false
 }
 
 func (srv *Server) listTables(ctx context.Context, req *mcp.CallToolRequest, args *ListTablesArgs) (*mcp.CallToolResult, any, error) {
@@ -342,13 +378,23 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 	}
 
 	items := []types.WriteRequest{}
+	failedItems := []map[string]any{}
 	for _, item := range args.Items {
+		_, _, _, shouldReturn := srv.hashPasswordInItem(item)
+		if shouldReturn {
+			failedItems = append(failedItems, item)
+			continue
+		}
 		av, err := attributevalue.MarshalMap(item)
 		if err != nil {
-			return srv.errorResult(fmt.Sprintf("Error when marshalling item %v: %v", item, err)), nil, nil
+			log.Printf("Error when marshalling item %v: %v", item, err)
+			failedItems = append(failedItems, item)
+			continue
 		}
 		if res := srv.validateSchema(args.TableName, av); res != nil {
-			return res, nil, nil
+			log.Printf("Error when validating schema for table %s: %v", args.TableName, res)
+			failedItems = append(failedItems, item)
+			continue
 		}
 		writeRequest := types.WriteRequest{
 			PutRequest: &types.PutRequest{
@@ -408,8 +454,19 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 	if totalUnprocessed > 0 {
 		unprocessedItemMsg = fmt.Sprintf("\nWarning: %d items were not processed due to provisioned throughput exceeded when batch putting items to table %s.", totalUnprocessed, args.TableName)
 	}
+	if len(failedItems) > 0 {
+		unprocessedItemMsg += "\nFailed to process the following items:\n"
+		for _, item := range failedItems {
+			jsonItem, err := json.MarshalIndent(item, "", "\t")
+			if err == nil {
+				unprocessedItemMsg += fmt.Sprintf("%v\n", string(jsonItem))
+			} else {
+				unprocessedItemMsg += fmt.Sprintf("\t%v\n", item)
+			}
+		}
+	}
 
-	return srv.successResult(fmt.Sprintf("Successfully put %d items into table %s%s", len(args.Items)-totalUnprocessed, args.TableName, unprocessedItemMsg)), nil, nil
+	return srv.successResult(fmt.Sprintf("Successfully put %d items into table %s%s", len(args.Items)-totalUnprocessed-len(failedItems), args.TableName, unprocessedItemMsg)), nil, nil
 }
 
 func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchDeleteItemsArgs) (*mcp.CallToolResult, any, error) {
@@ -628,11 +685,42 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		Key:                    key,
 		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
 	}
-
+	passwordAlias := ""
 	if len(args.ExpressionAttributeNames) > 0 {
 		input.ExpressionAttributeNames = args.ExpressionAttributeNames
+		if srv.guardrail.Config.EnforcePasswordHashing {
+			for alias, key := range args.ExpressionAttributeNames {
+				if strings.EqualFold(key, "password") {
+					passwordAlias = ":" + strings.TrimLeft(alias, "#")
+					break
+				}
+			}
+		}
+	}
+	if passwordAlias == "" && srv.guardrail.Config.EnforcePasswordHashing && args.UpdateExpression != "" {
+		re := regexp.MustCompile(`(?i)\bpassword\s*=\s*(:\w+)`)
+		matches := re.FindStringSubmatch(args.UpdateExpression)
+		if len(matches) == 2 {
+			passwordAlias = matches[1]
+		}
 	}
 	if len(args.ExpressionAttributeValues) > 0 {
+		// Hash any password values found in expressionAttributeValues
+		if srv.guardrail.Config.EnforcePasswordHashing && passwordAlias != "" {
+			for key, val := range args.ExpressionAttributeValues {
+				if key == passwordAlias {
+					passwordStr, ok := val.(string)
+					if !ok {
+						return srv.errorResult("Password must be a string"), nil, nil
+					}
+					hashedVal, err := crypto.HashPassword(passwordStr)
+					if err != nil {
+						return srv.errorResult(fmt.Sprintf("Error when hashing password value for key %s for table %s: %v", key, args.TableName, err)), nil, nil
+					}
+					args.ExpressionAttributeValues[key] = hashedVal
+				}
+			}
+		}
 		attriValue, err := attributevalue.MarshalMap(args.ExpressionAttributeValues)
 		if err != nil {
 			return srv.errorResult(fmt.Sprintf("Error when marshalling expression attribute value %v for table %s: %v", args.ExpressionAttributeValues, args.TableName, err)), nil, nil
@@ -1134,7 +1222,7 @@ func (srv *Server) ingestDocument(ctx context.Context, req *mcp.CallToolRequest,
 		return srv.errorResult(fmt.Sprintf("DescribeTable %s failed: %v", args.TableName, err)), nil, nil
 	}
 	pkName := getPrimaryKey(des)
-	
+
 	for {
 		result, err := instrumentDynamoDB("scan_table", args.TableName, func() (*dynamodb.ScanOutput, error) {
 			return srv.db.Scan(ctx, input)

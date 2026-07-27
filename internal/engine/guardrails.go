@@ -13,7 +13,7 @@ import (
 
 type Guardrail struct {
 	protectedTable map[string]bool
-	config         *AppConfig
+	Config         *AppConfig
 }
 
 const MaxIndividualSize = 400 * 1024
@@ -26,7 +26,7 @@ func NewGuardrail(config *AppConfig) *Guardrail {
 	}
 	return &Guardrail{
 		protectedTable: protectedTable,
-		config:         config,
+		Config:         config,
 	}
 }
 
@@ -90,7 +90,7 @@ func (g *Guardrail) matchType(value types.AttributeValue, expected string) bool 
 }
 
 func (g *Guardrail) getTableConfig(tableName string) *TableConfig {
-	for _, table := range g.config.Tables {
+	for _, table := range g.Config.Tables {
 		if table.Name == tableName {
 			return &table
 		}
@@ -107,7 +107,7 @@ func (g *Guardrail) ValidateReadOnlyTable(tableName string) error {
 }
 
 func (g *Guardrail) ValidateCapacityUnits(cu int64) error {
-	maxThroughputIncrease := int64(g.config.RiskThresholds.MaxThroughputIncrease)
+	maxThroughputIncrease := int64(g.Config.RiskThresholds.MaxThroughputIncrease)
 	if cu > maxThroughputIncrease {
 		return fmt.Errorf("capacity units %d exceed limit of %d", cu, maxThroughputIncrease)
 	}
@@ -117,12 +117,12 @@ func (g *Guardrail) ValidateCapacityUnits(cu int64) error {
 func (g *Guardrail) EnforceLimit(limit int32) (int32, string) {
 	var warning string
 	if limit <= 0 {
-		limit = g.config.GlobalLimits.DefaultLimit
+		limit = g.Config.GlobalLimits.DefaultLimit
 	}
 
-	if limit > g.config.GlobalLimits.MaxLimit {
-		limit = g.config.GlobalLimits.MaxLimit
-		warning = fmt.Sprintf("Limit was set to %d as it was higher than the maximum allowed limit: %d", limit, g.config.GlobalLimits.MaxLimit)
+	if limit > g.Config.GlobalLimits.MaxLimit {
+		limit = g.Config.GlobalLimits.MaxLimit
+		warning = fmt.Sprintf("Limit was set to %d as it was higher than the maximum allowed limit: %d", limit, g.Config.GlobalLimits.MaxLimit)
 	}
 	return limit, warning
 }
@@ -145,10 +145,10 @@ func (g *Guardrail) ScrubItems(operation, tableName string, items []map[string]a
 }
 
 func (g *Guardrail) GetTags(tagName string) []string {
-	if g.config.ProtectedTags == nil {
+	if g.Config.ProtectedTags == nil {
 		return []string{}
 	}
-	values, exists := g.config.ProtectedTags[tagName]
+	values, exists := g.Config.ProtectedTags[tagName]
 	if !exists {
 		return []string{}
 	}
@@ -156,7 +156,7 @@ func (g *Guardrail) GetTags(tagName string) []string {
 }
 
 func (g *Guardrail) isSensitiveField(field string) bool {
-	for _, sensitiveField := range g.config.SensitiveFields {
+	for _, sensitiveField := range g.Config.SensitiveFields {
 		if strings.EqualFold(field, sensitiveField) {
 			return true
 		}

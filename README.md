@@ -460,6 +460,8 @@ The original high-availability deployment using ECS Fargate, ALB, CloudFront, an
 
 Open `https://dynamodb-sage.yourdomain.com/` in a browser. A Next.js SPA embedded directly in the Go binary — no separate deployment.
 
+For local development, visit `http://localhost:8080/` (Docker) or `http://localhost:8081/` (Go binary on host).
+
 | Tab | Description |
 |-----|-------------|
 | Chat | **Default landing page.** AI-powered natural language interface with streaming responses, markdown tables, JSON rendering, copy button on messages, and suggested prompts |
