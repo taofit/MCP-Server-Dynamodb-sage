@@ -13,6 +13,8 @@ sensitive_fields:
   - card_number
   - credit_card
 
+enforce_password_hashing: true
+
 protected_tables:
   - Transactions
   - SystemConfig

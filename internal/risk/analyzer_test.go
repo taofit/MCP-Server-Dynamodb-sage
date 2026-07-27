@@ -331,6 +331,79 @@ func TestAnalyzeUpdateTable_ReadOnlyTable(t *testing.T) {
 	}
 }
 
+func TestFormatSensitiveFieldsWarning_PasswordOnly_HashingEnabled(t *testing.T) {
+	result := formatSensitiveFieldsWarning([]string{"password"}, true)
+	if !strings.Contains(result, "automatically hashed") {
+		t.Fatalf("expected 'automatically hashed' in result, got: %s", result)
+	}
+	if strings.Contains(result, "encrypted or tokenized") {
+		t.Fatalf("should NOT contain 'encrypted or tokenized' for password-only, got: %s", result)
+	}
+}
+
+func TestFormatSensitiveFieldsWarning_OtherFieldsOnly_HashingEnabled(t *testing.T) {
+	result := formatSensitiveFieldsWarning([]string{"ssn", "token"}, true)
+	if strings.Contains(result, "automatically hashed") {
+		t.Fatalf("should NOT contain 'automatically hashed' when no password field, got: %s", result)
+	}
+	if !strings.Contains(result, "ssn") || !strings.Contains(result, "token") {
+		t.Fatalf("result should list both fields, got: %s", result)
+	}
+	if !strings.Contains(result, "encrypted or tokenized") {
+		t.Fatalf("result should contain 'encrypted or tokenized', got: %s", result)
+	}
+}
+
+func TestFormatSensitiveFieldsWarning_MixedFields_HashingEnabled(t *testing.T) {
+	result := formatSensitiveFieldsWarning([]string{"password", "ssn", "token"}, true)
+	if !strings.Contains(result, "automatically hashed") {
+		t.Fatalf("expected 'automatically hashed' for password, got: %s", result)
+	}
+	if !strings.Contains(result, "encrypted or tokenized") {
+		t.Fatalf("expected 'encrypted or tokenized' for other fields, got: %s", result)
+	}
+	if !strings.Contains(result, "ssn") || !strings.Contains(result, "token") {
+		t.Fatalf("result should list ssn and token, got: %s", result)
+	}
+}
+
+func TestFormatSensitiveFieldsWarning_EmptyFields_HashingEnabled(t *testing.T) {
+	result := formatSensitiveFieldsWarning([]string{}, true)
+	if result != "Item contains sensitive fields: " {
+		t.Fatalf("expected empty suffix, got: %s", result)
+	}
+}
+
+func TestFormatSensitiveFieldsWarning_PasswordOnly_HashingDisabled(t *testing.T) {
+	result := formatSensitiveFieldsWarning([]string{"password"}, false)
+	if !strings.Contains(result, "password") {
+		t.Fatalf("result should contain 'password', got: %s", result)
+	}
+	if strings.Contains(result, "automatically hashed") {
+		t.Fatalf("should NOT contain 'automatically hashed' when hashing disabled, got: %s", result)
+	}
+}
+
+func TestFormatSensitiveFieldsWarning_MixedFields_HashingDisabled(t *testing.T) {
+	result := formatSensitiveFieldsWarning([]string{"password", "ssn"}, false)
+	if strings.Contains(result, "automatically hashed") {
+		t.Fatalf("should NOT contain 'automatically hashed' when hashing disabled, got: %s", result)
+	}
+	if !strings.Contains(result, "password") || !strings.Contains(result, "ssn") {
+		t.Fatalf("result should list both fields, got: %s", result)
+	}
+}
+
+func TestFormatSensitiveFieldsWarning_PasswordCaseInsensitive(t *testing.T) {
+	result := formatSensitiveFieldsWarning([]string{"Password", "PASSWORD"}, true)
+	if !strings.Contains(result, "automatically hashed") {
+		t.Fatalf("expected 'automatically hashed' for case-insensitive password match, got: %s", result)
+	}
+	if strings.Contains(result, "encrypted or tokenized") {
+		t.Fatalf("should NOT contain 'encrypted or tokenized' since all fields are password variants, got: %s", result)
+	}
+}
+
 func TestAnalyzeScan_GSIProjectionAllWarning(t *testing.T) {
 	// 1️⃣ Mock DynamoDB DescribeTable to return a table with one GSI:
 	mockDB := &mockDynamoDB{

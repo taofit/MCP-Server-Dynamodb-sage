@@ -31,13 +31,14 @@ type RiskThresholds struct {
 }
 
 type AppConfig struct {
-	GlobalLimits    GlobalLimits        `yaml:"global_limits"`
-	SensitiveFields []string            `yaml:"sensitive_fields"`
-	ProtectedTables []string            `yaml:"protected_tables"`
-	Tables          []TableConfig       `yaml:"tables"`
-	RiskThresholds  RiskThresholds      `yaml:"risk_thresholds"`
-	RiskLevel       RiskLevel           `yaml:"risk_level"`
-	ProtectedTags   map[string][]string `yaml:"protected_tags"`
+	GlobalLimits           GlobalLimits        `yaml:"global_limits"`
+	SensitiveFields        []string            `yaml:"sensitive_fields"`
+	EnforcePasswordHashing bool                `yaml:"enforce_password_hashing"`
+	ProtectedTables        []string            `yaml:"protected_tables"`
+	Tables                 []TableConfig       `yaml:"tables"`
+	RiskThresholds         RiskThresholds      `yaml:"risk_thresholds"`
+	RiskLevel              RiskLevel           `yaml:"risk_level"`
+	ProtectedTags          map[string][]string `yaml:"protected_tags"`
 	Rag				RagConfig		    `yaml:"rag"`
 }
 

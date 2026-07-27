@@ -379,7 +379,7 @@ func (ra *RiskAnalyzer) analyzeBatchPut(ctx context.Context, req *mcp.CallToolRe
 			sensitiveFields = append(sensitiveFields, ra.guardrail.GetSensitiveFields(item)...)
 		}
 		if len(sensitiveFields) > 0 {
-			reason = append(reason, fmt.Sprintf("Item contains sensitive fields: %s, please consider encryption or tokenization the fields before upload", strings.Join(sensitiveFields, ", ")))
+			reason = append(reason, formatSensitiveFieldsWarning(sensitiveFields, ra.config.EnforcePasswordHashing))
 		}
 	}
 	// 5. Check for PII fields in the table
@@ -518,7 +518,7 @@ func (ra *RiskAnalyzer) analyzePutItem(ctx context.Context, req *mcp.CallToolReq
 	// 3. Check for sensitive fields in item
 	sensitiveFields := ra.guardrail.GetSensitiveFields(args.Item)
 	if len(sensitiveFields) > 0 {
-		reason = append(reason, fmt.Sprintf("Item contains sensitive fields: %s, please consider encryption or tokenization", strings.Join(sensitiveFields, ", ")))
+		reason = append(reason, formatSensitiveFieldsWarning(sensitiveFields, ra.config.EnforcePasswordHashing))
 	}
 
 	// 4. Check table-specific PII fields from config
@@ -840,4 +840,23 @@ func (ra *RiskAnalyzer) String(r engine.RiskLevel) string {
 	default:
 		return "UNKNOWN"
 	}
+}
+
+func formatSensitiveFieldsWarning(fields []string, enforcePasswordHashing bool) string {
+	if !enforcePasswordHashing {
+		return fmt.Sprintf("Item contains sensitive fields: %s", strings.Join(fields, ", "))
+	}
+	var otherFields []string
+	parts := []string{}
+	for _, f := range fields {
+		if strings.EqualFold(f, "password") {
+			parts = append(parts,  "Item contains password field, which is automatically hashed")
+		} else {
+			otherFields = append(otherFields, f)
+		}
+	}
+	if len(otherFields) > 0 {
+		parts = append(parts, fmt.Sprintf("fields %s should be encrypted or tokenized before upload", strings.Join(otherFields, ", ")))
+	}
+	return fmt.Sprintf("Item contains sensitive fields: %s", strings.Join(parts, "; "))
 }
