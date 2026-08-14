@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { apiFetch } from "@/lib/api";
 
 export interface Notification {
   title: string;
@@ -33,7 +34,7 @@ export const useNotificationsStore = create<NotificationsState>()(
 
       fetchNotifications: async () => {
         try {
-          const res = await fetch("/api/notifications");
+          const res = await apiFetch("/api/notifications");
           if (!res.ok) return;
           const data: Notification[] = await res.json();
           set({ notifications: data });

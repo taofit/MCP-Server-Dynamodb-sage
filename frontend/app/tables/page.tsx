@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch } from "@/lib/api";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -485,7 +486,7 @@ export default function TablesPage() {
     let cancelled = false;
     async function load() {
       try {
-        const res = await fetch("/api/tables");
+        const res = await apiFetch("/api/tables");
         const data: TableInfo[] = await res.json();
         if (!cancelled) setTables(data);
       } catch {
@@ -506,7 +507,7 @@ export default function TablesPage() {
     async function load() {
       setDescLoading(true);
       try {
-        const res = await fetch(`/api/tables/${encodeURIComponent(tableName)}`);
+        const res = await apiFetch(`/api/tables/${encodeURIComponent(tableName)}`);
         const data: TableDescription = await res.json();
         if (!cancelled) setDesc(data);
       } catch {
@@ -527,7 +528,7 @@ export default function TablesPage() {
     async function load() {
       setItemsLoading(true);
       try {
-        const res = await fetch(`/api/tables/${encodeURIComponent(tableName)}/items?limit=20`);
+        const res = await apiFetch(`/api/tables/${encodeURIComponent(tableName)}/items?limit=20`);
         const data: Record<string, unknown>[] = await res.json();
         if (!cancelled) setItems(data);
       } catch {
@@ -541,12 +542,12 @@ export default function TablesPage() {
   }, [selected, tab]);
 
   const handleRefresh = () => {
-    fetch("/api/tables")
+    apiFetch("/api/tables")
       .then((r) => r.json())
       .then((data: TableInfo[]) => setTables(data))
       .catch(() => setTables([]));
     if (selected) {
-      fetch(`/api/tables/${encodeURIComponent(selected)}`)
+      apiFetch(`/api/tables/${encodeURIComponent(selected)}`)
         .then((r) => r.json())
         .then((data: TableDescription) => setDesc(data))
         .catch(() => setDesc(null));

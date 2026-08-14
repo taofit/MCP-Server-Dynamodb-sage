@@ -23,6 +23,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch } from "@/lib/api";
 
 type HealthStatus = "ok" | "error" | "not_configured";
 
@@ -322,9 +323,9 @@ export default function MonitoringPage() {
   const fetchData = useCallback(async () => {
     try {
       const [healthData, statsData, metricsText] = await Promise.all([
-        fetch("/api/health").then((r) => r.json()),
-        fetch("/api/stats").then((r) => r.json()),
-        fetch("/api/metrics").then((r) => r.text()),
+        apiFetch("/api/health").then((r) => r.json()),
+        apiFetch("/api/stats").then((r) => r.json()),
+        apiFetch("/api/metrics").then((r) => r.text()),
       ]);
       setHealth(healthData);
       setStats(statsData);

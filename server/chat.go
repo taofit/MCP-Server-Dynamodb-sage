@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"dynamodb-sage/internal/llm"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -22,6 +23,17 @@ type chatResponse struct {
 }
 
 const historyLimit = 10
+
+var readOnlyTools = map[string]bool{
+	"list_tables":       true,
+	"describe_table":    true,
+	"scan_table":        true,
+	"query_table":       true,
+	"get_item":          true,
+	"read_audit_logs":   true,
+	"search_collection": true,
+	"batch_get_items":   true,
+}
 
 func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -40,10 +52,15 @@ func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().Unix()
 	srv.store.AddChatHistory("user", "", msg, now)
+	role, ok := getUserRoleFromContext(r.Context())
+	if !ok {
+		role = roleGuest
+	}
+	ctx := context.WithValue(srv.mcpCtx, userRoleContextKey, role)
 	tokenChan := make(chan string, 64)
 	go func() {
 		defer close(tokenChan)
-		if err := srv.generateChat(msg, tokenChan); err != nil {
+		if err := srv.streamChatReply(ctx, msg, tokenChan); err != nil {
 			log.Printf("LLM error: %v", err)
 			tokenChan <- fmt.Sprintf("LLM error: %v", err)
 		}
@@ -72,10 +89,10 @@ func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	srv.store.AddChatHistory("assistant", "", resp, now)
 }
 
-func (srv *Server) generateChat(msg string, tokenChan chan string) error {
+func (srv *Server) streamChatReply(ctx context.Context, msg string, tokenChan chan string) error {
 	// Retrieve last 10 messages from store (includes the user message just added in handleChat)
 	llmMessages := srv.buildChatHistory(msg)
-	err := srv.generateChatResponse(srv.mcpCtx, llmMessages, tokenChan)
+	err := srv.generateChat(ctx, llmMessages, tokenChan)
 	if err != nil {
 		return fmt.Errorf("LLM temporarily unavailable - use tools instead or /help for commands: %w", err)
 	}
@@ -108,13 +125,18 @@ func (srv *Server) buildChatHistory(msg string) []llm.Message {
 	return llmMessages
 }
 
-func (srv *Server) generateChatResponse(ctx context.Context, messages []llm.Message, tokenChan chan string) error {
+func (srv *Server) generateChat(ctx context.Context, messages []llm.Message, tokenChan chan string) error {
 	if srv.llm == nil {
 		return fmt.Errorf("LLM not initialized")
 	}
+	role, ok := getUserRoleFromContext(ctx)
+	if !ok {
+		role = roleGuest
+	}
+	tools := srv.GetToolDefsForRole(role)
 	const maxIterations = 10
 	for i := 0; i < maxIterations; i++ {
-		toolCalls, err := srv.llm.Generate(ctx, srv.llm.LoadSystemPrompt(), messages, srv.toolDefs, tokenChan)
+		toolCalls, err := srv.llm.Generate(ctx, srv.llm.LoadSystemPrompt(), messages, tools, tokenChan)
 		if err != nil {
 			log.Printf("LLM error: %v", err)
 			return err
@@ -124,12 +146,12 @@ func (srv *Server) generateChatResponse(ctx context.Context, messages []llm.Mess
 		}
 
 		messages = append(messages, llm.Message{
-			Role:    "assistant",
+			Role:      "assistant",
 			ToolCalls: toolCalls,
 		})
 		toolResults := fetchToolResults(ctx, toolCalls, srv)
 		messages = append(messages, llm.Message{
-			Role:    "user",
+			Role:        "user",
 			ToolResults: toolResults,
 		})
 	}
@@ -164,43 +186,43 @@ func (srv *Server) executeToolByName(ctx context.Context, name string, args json
 	// makes the Claude-driven path go through the guardrail just like MCP.
 	switch name {
 	case "list_tables":
-		return runGuardedTool(srv,ctx, name, args, false, srv.listTables)
+		return runGuardedTool(srv, ctx, name, args, false, srv.listTables)
 	case "describe_table":
-		return runGuardedTool(srv,ctx, name, args, false, srv.describeTable)
+		return runGuardedTool(srv, ctx, name, args, false, srv.describeTable)
 	case "scan_table":
-		return runGuardedTool(srv,ctx, name, args, true, srv.scanTable)
+		return runGuardedTool(srv, ctx, name, args, true, srv.scanTable)
 	case "query_table":
-		return runGuardedTool(srv,ctx, name, args, false, srv.queryTable)
+		return runGuardedTool(srv, ctx, name, args, false, srv.queryTable)
 	case "put_item":
-		return runGuardedTool(srv,ctx, name, args, true, srv.putItem)
+		return runGuardedTool(srv, ctx, name, args, true, srv.putItem)
 	case "get_item":
-		return runGuardedTool(srv,ctx, name, args, false, srv.getItem)
+		return runGuardedTool(srv, ctx, name, args, false, srv.getItem)
 	case "update_item":
-		return runGuardedTool(srv,ctx, name, args, true, srv.updateItem)
+		return runGuardedTool(srv, ctx, name, args, true, srv.updateItem)
 	case "delete_item":
-		return runGuardedTool(srv,ctx, name, args, true, srv.deleteItem)
+		return runGuardedTool(srv, ctx, name, args, true, srv.deleteItem)
 	case "batch_get_items":
-		return runGuardedTool(srv,ctx, name, args, true, srv.batchGetItems)
+		return runGuardedTool(srv, ctx, name, args, true, srv.batchGetItems)
 	case "batch_put_items":
-		return runGuardedTool(srv,ctx, name, args, true, srv.batchPutItems)
+		return runGuardedTool(srv, ctx, name, args, true, srv.batchPutItems)
 	case "batch_delete_items":
-		return runGuardedTool(srv,ctx, name, args, true, srv.batchDeleteItems)
+		return runGuardedTool(srv, ctx, name, args, true, srv.batchDeleteItems)
 	case "create_optimized_table":
-		return runGuardedTool(srv,ctx, name, args, true, srv.createOptimizedTable)
+		return runGuardedTool(srv, ctx, name, args, true, srv.createOptimizedTable)
 	case "delete_table":
-		return runGuardedTool(srv,ctx, name, args, true, srv.deleteTable)
+		return runGuardedTool(srv, ctx, name, args, true, srv.deleteTable)
 	case "update_table":
-		return runGuardedTool(srv,ctx, name, args, true, srv.updateTable)
+		return runGuardedTool(srv, ctx, name, args, true, srv.updateTable)
 	case "update_table_ttl":
-		return runGuardedTool(srv,ctx, name, args, false, srv.updateTableTTL)
+		return runGuardedTool(srv, ctx, name, args, false, srv.updateTableTTL)
 	case "read_audit_logs":
-		return runGuardedTool(srv,ctx, name, args, false, srv.readAuditLogs)
+		return runGuardedTool(srv, ctx, name, args, false, srv.readAuditLogs)
 	case "ingest_document":
-		return runGuardedTool(srv,ctx, name, args, true, srv.ingestDocument)
+		return runGuardedTool(srv, ctx, name, args, true, srv.ingestDocument)
 	case "search_collection":
-		return runGuardedTool(srv,ctx, name, args, false, srv.searchCollection)
+		return runGuardedTool(srv, ctx, name, args, false, srv.searchCollection)
 	case "get_job_result":
-		return runGuardedTool(srv,ctx, name, args, false, srv.getJobResult)
+		return runGuardedTool(srv, ctx, name, args, false, srv.getJobResult)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -244,4 +266,22 @@ func (srv *Server) formatToolResult(result *mcp.CallToolResult, err error) strin
 		return "No content available."
 	}
 	return strings.Join(textParts, "\n")
+}
+
+func (srv *Server) isReadOnlyTool(toolName string) bool {
+	return readOnlyTools[strings.ToLower(toolName)]
+}
+
+func (srv *Server) GetToolDefsForRole(role string) []llm.ToolDef {
+	if role == roleAdmin {
+		return srv.toolDefs
+	}
+
+	var guestDefs = make([]llm.ToolDef, 0, len(srv.toolDefs))
+	for _, tool := range srv.toolDefs {
+		if srv.isReadOnlyTool(tool.Name) {
+			guestDefs = append(guestDefs, tool)
+		}
+	}
+	return guestDefs
 }

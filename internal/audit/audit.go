@@ -76,6 +76,9 @@ func (a *AuditLog) ReadAuditHistory(limit int32, startTime time.Time, endTime ti
 		entry.Timestamp = time.Unix(tsUnix, 0)
 		entries = append(entries, entry)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	if entries == nil {
 		entries = []AuditEntry{}
 	}

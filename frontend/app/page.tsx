@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Send, Loader2, Trash2, Copy, Check } from "lucide-react";
 import { useChatStore } from "@/store/chat";
+import { apiFetch } from "@/lib/api";
 
 const suggestedPrompts = [
   "List all my DynamoDB tables",
@@ -293,7 +294,7 @@ export default function ChatPage() {
     const assistantId = addMessage({ role: "assistant", content: "" });
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text }),

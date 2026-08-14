@@ -172,7 +172,7 @@ func (srv *Server) HTTPHandler() http.Handler {
 		}
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version, Authorization")
 		w.Header().Set("Access-Control-Expose-Headers", "Content-Type")
 
 		if r.Method == http.MethodOptions {
@@ -253,6 +253,10 @@ func (srv *Server) HTTPHandler() http.Handler {
 				json.NewEncoder(w).Encode(tables)
 				return
 			}
+			if r.URL.Path == "/api/demo" {
+				srv.demoHandler(w, r)
+				return
+			}
 			// SPA routes: try to serve the file, fall back to index.html for client-side routing
 			staticFS, err := fs.Sub(dashboardFS, "static")
 			if err == nil {
@@ -288,6 +292,10 @@ func (srv *Server) HTTPHandler() http.Handler {
 			return
 		}
 
+		if r.URL.Path == "/api/login" {
+			srv.loginHandler(w, r)
+			return
+		}
 		if r.URL.Path == "/api/chat" {
 			srv.handleChat(w, r)
 			return
@@ -322,7 +330,7 @@ func (srv *Server) ServeHTTP(addr string) error {
 	if v := os.Getenv("DYNAMO_SAGE_ADDR"); v != "" {
 		addr = v
 	}
-	return http.ListenAndServe(addr, srv.HTTPHandler())
+	return http.ListenAndServe(addr, srv.AuthMiddleware(srv.HTTPHandler()))
 }
 
 func (srv *Server) SetTransport(t string) {

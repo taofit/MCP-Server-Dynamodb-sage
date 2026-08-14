@@ -1,7 +1,7 @@
 "use client";
 
 import { useTheme } from "./ThemeProvider";
-import { Sun, Moon, Menu } from "lucide-react";
+import { Sun, Moon, Menu, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
@@ -16,6 +16,8 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
 import { NotificationBell } from "@/components/NotificationBell";
+import { useAuthStore } from "@/store/auth";
+import { logout } from "@/lib/api";
 
 const mobileNavItems = [
   { href: "/", label: "Chat", icon: MessageSquare },
@@ -30,6 +32,7 @@ export function Header() {
   const { theme, toggle } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
+  const role = useAuthStore((s) => s.role);
 
   return (
     <header className="flex items-center justify-between px-4 h-14 border-b border-border bg-background/80 backdrop-blur-sm">
@@ -51,6 +54,12 @@ export function Header() {
 
       {/* Right side actions */}
       <div className="flex items-center gap-1">
+        {role && (
+          <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border text-xs text-muted-foreground capitalize mr-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            {role}
+          </span>
+        )}
         <NotificationBell />
         <Button variant="ghost" size="icon" onClick={toggle}>
           {theme === "dark" ? (
@@ -58,6 +67,9 @@ export function Header() {
           ) : (
             <Moon className="w-5 h-5 text-muted-foreground" />
           )}
+        </Button>
+        <Button variant="ghost" size="icon" onClick={logout} title="Sign out">
+          <LogOut className="w-5 h-5 text-muted-foreground" />
         </Button>
       </div>
 

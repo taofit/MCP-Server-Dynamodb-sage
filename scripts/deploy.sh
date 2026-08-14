@@ -51,6 +51,15 @@ AWS_KEY=$(terraform output -raw aws_access_key_id)
 AWS_SECRET=$(awk -F'= ' '/aws_secret_access_key/ {print $2}' "$DIR/keys/lightsail-credentials.ini")
 cd "$DIR"
 
+# Load auth tokens from local .env (gitignored) — do NOT hardcode them here,
+# otherwise the admin key would be committed to the repo.
+GUEST_KEY="$(awk -F= '/^GUEST_KEY=/{print $2}' "$DIR/.env" | tail -1)"
+ADMIN_KEY="$(awk -F= '/^ADMIN_KEY=/{print $2}' "$DIR/.env" | tail -1)"
+if [ -z "$GUEST_KEY" ] || [ -z "$ADMIN_KEY" ]; then
+  echo "  ERROR: GUEST_KEY/ADMIN_KEY not set in $DIR/.env" >&2
+  exit 1
+fi
+
 echo ""
 echo "=== Step 4: Build frontend and Go binary for linux/amd64 (locally) ==="
 VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}"
@@ -112,6 +121,8 @@ LLM_BASE_URL=
 OPENAI_API_KEY_PARAM=/dynamodb-sage/openai/api-key
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
+GUEST_KEY=$GUEST_KEY
+ADMIN_KEY=$ADMIN_KEY
 CORS_ORIGIN=https://dynamodb-sage.hzcentre.com
 ENVEOF"
 

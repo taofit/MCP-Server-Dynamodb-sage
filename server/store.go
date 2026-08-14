@@ -91,6 +91,9 @@ func (s *Store) GetNotifications() ([]notification.NotificationPayload, error) {
 		}
 		notifications = append(notifications, n)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return notifications, nil
 }
 
@@ -125,6 +128,9 @@ func (s *Store) getTotal(tableName string) (int, error) {
 			return 0, err
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
 	return count, nil
 }
 
@@ -141,6 +147,9 @@ func (s *Store) GetChatHistory(limit int) ([]ChatMessage, error) {
 			return nil, err
 		}
 		chatHistory = append(chatHistory, chatMessage)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return chatHistory, nil
 }
