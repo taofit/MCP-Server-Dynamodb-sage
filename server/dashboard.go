@@ -23,26 +23,26 @@ import (
 )
 
 type tableInfo struct {
-	TableName  string `json:"tableName"`
-	ItemCount  int64  `json:"itemCount"`
-	SizeBytes  int64  `json:"sizeBytes"`
-	Status     string `json:"status"`
+	TableName string `json:"tableName"`
+	ItemCount int64  `json:"itemCount"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Status    string `json:"status"`
 }
 
 const maxTablesToDisplay = 100
 const maxTableItemsToDisplay = 100
 
 var extContentType = map[string]string{
-	".js":   "application/javascript",
-	".css":  "text/css",
-	".html": "text/html; charset=utf-8",
-	".png":  "image/png",
-	".svg":  "image/svg+xml",
-	".ico":  "image/x-icon",
-	".json": "application/json",
-	".woff": "font/woff",
+	".js":    "application/javascript",
+	".css":   "text/css",
+	".html":  "text/html; charset=utf-8",
+	".png":   "image/png",
+	".svg":   "image/svg+xml",
+	".ico":   "image/x-icon",
+	".json":  "application/json",
+	".woff":  "font/woff",
 	".woff2": "font/woff2",
-	".ttf": "font/ttf",
+	".ttf":   "font/ttf",
 }
 
 func ext(path string) string {
@@ -258,18 +258,18 @@ func (srv *Server) getTableMetadata(tableName string) (tableInfo, error) {
 }
 
 type TableDescription struct {
-	TableName            string                 `json:"tableName"`
-	Status               string                 `json:"status"`
-	KeySchema            []KeySchemaEntry       `json:"keySchema"`
+	TableName            string                  `json:"tableName"`
+	Status               string                  `json:"status"`
+	KeySchema            []KeySchemaEntry        `json:"keySchema"`
 	AttributeDefinitions []AttributeDefinitionDB `json:"attributeDefinitions"`
-	ItemCount            int64                  `json:"itemCount"`
-	SizeBytes            int64                  `json:"sizeBytes"`
-	Throughput           *ThroughputInfo        `json:"throughput,omitempty"`
-	BillingMode          string                 `json:"billingMode,omitempty"`
-	GSIs                 []GSIInfo              `json:"gsis"`
-	LSIs                 []GSIInfo              `json:"lsis"`
-	TTLAttribute         string                 `json:"ttlAttribute,omitempty"`
-	TTLEnabled           bool                   `json:"ttlEnabled"`
+	ItemCount            int64                   `json:"itemCount"`
+	SizeBytes            int64                   `json:"sizeBytes"`
+	Throughput           *ThroughputInfo         `json:"throughput,omitempty"`
+	BillingMode          string                  `json:"billingMode,omitempty"`
+	GSIs                 []GSIInfo               `json:"gsis"`
+	LSIs                 []GSIInfo               `json:"lsis"`
+	TTLAttribute         string                  `json:"ttlAttribute,omitempty"`
+	TTLEnabled           bool                    `json:"ttlEnabled"`
 }
 
 type KeySchemaEntry struct {

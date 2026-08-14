@@ -24,17 +24,6 @@ type chatResponse struct {
 
 const historyLimit = 10
 
-var readOnlyTools = map[string]bool{
-	"list_tables":       true,
-	"describe_table":    true,
-	"scan_table":        true,
-	"query_table":       true,
-	"get_item":          true,
-	"read_audit_logs":   true,
-	"search_collection": true,
-	"batch_get_items":   true,
-}
-
 func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -266,22 +255,4 @@ func (srv *Server) formatToolResult(result *mcp.CallToolResult, err error) strin
 		return "No content available."
 	}
 	return strings.Join(textParts, "\n")
-}
-
-func (srv *Server) isReadOnlyTool(toolName string) bool {
-	return readOnlyTools[strings.ToLower(toolName)]
-}
-
-func (srv *Server) GetToolDefsForRole(role string) []llm.ToolDef {
-	if role == roleAdmin {
-		return srv.toolDefs
-	}
-
-	var guestDefs = make([]llm.ToolDef, 0, len(srv.toolDefs))
-	for _, tool := range srv.toolDefs {
-		if srv.isReadOnlyTool(tool.Name) {
-			guestDefs = append(guestDefs, tool)
-		}
-	}
-	return guestDefs
 }

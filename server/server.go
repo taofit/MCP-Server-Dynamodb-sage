@@ -2,6 +2,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"dynamodb-sage/internal/audit"
 	"dynamodb-sage/internal/engine"
@@ -11,6 +12,7 @@ import (
 	"dynamodb-sage/internal/rag"
 	"dynamodb-sage/internal/risk"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"iter"
 	"log"
@@ -306,6 +308,10 @@ func (srv *Server) HTTPHandler() http.Handler {
 			return
 		}
 
+		if r.URL.Path == "/mcp" && !srv.gateGuestToolCalls(w, r) {
+			return
+		}
+
 		handler.ServeHTTP(w, r)
 	})
 }
@@ -314,6 +320,60 @@ func (srv *Server) initLLM() error {
 	var err error
 	srv.llm, err = llm.NewClient(srv.mcpCtx)
 	return err
+}
+
+// gateGuestToolCalls blocks guest-role MCP tool calls that are not read-only.
+// MCP transport methods arrive via POST to /mcp with the tool name inside the
+// JSON-RPC body, so the gate must parse the body rather than inspect the URL.
+// When a blocked call is found it returns false and writes a JSON-RPC error;
+// otherwise it restores the body and returns true so the handler can proceed.
+func (srv *Server) gateGuestToolCalls(w http.ResponseWriter, r *http.Request) bool {
+	body, err := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return true
+	}
+
+	role, ok := getUserRoleFromContext(r.Context())
+	if ok && role == roleAdmin {
+		return true
+	}
+
+	trimmed := bytes.TrimSpace(body)
+	var msgs []json.RawMessage
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		if err := json.Unmarshal(body, &msgs); err != nil {
+			return true
+		}
+	} else {
+		msgs = []json.RawMessage{body}
+	}
+
+	for _, raw := range msgs {
+		var m struct {
+			Method string `json:"method"`
+			ID     any    `json:"id"`
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			continue
+		}
+		if m.Method == "tools/call" && !srv.isReadOnlyTool(m.Params.Name) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      m.ID,
+				"error": map[string]any{
+					"code":    -32001,
+					"message": "Tool not allowed for guest role",
+				},
+			})
+			return false
+		}
+	}
+	return true
 }
 
 func (srv *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
