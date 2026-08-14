@@ -24,6 +24,17 @@ type JobResult struct {
 	StartedAt time.Time           `json:"startedAt,omitempty"`
 }
 
+var readOnlyTools = map[string]bool{
+	"list_tables":       true,
+	"describe_table":    true,
+	"scan_table":        true,
+	"query_table":       true,
+	"get_item":          true,
+	"read_audit_logs":   true,
+	"search_collection": true,
+	"batch_get_items":   true,
+}
+
 func (srv *Server) addTools() {
 	defs := srv.buildToolDefs()
 	defsByName := make(map[string]llm.ToolDef, len(defs))
@@ -383,10 +394,10 @@ func (srv *Server) buildToolDefs() []llm.ToolDef {
 		defs = append(defs, llm.ToolDef{Name: "search_collection", Description: "Search for documents in a collection by vector similarity. Use score_threshold to control match strictness: 0.7+ for exact/specific matches, 0.5-0.7 for moderate relevance, 0.3-0.5 for broad/explore queries. Omit to use the default threshold (0.75).", InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"collectionName": map[string]any{"type": "string", "description": "The name of the collection to search in"},
-				"query":          map[string]any{"type": "string", "description": "The query to search for"},
-				"limit":          map[string]any{"type": "integer", "description": "The limit of documents to return"},
-				"filter":         map[string]any{"type": "string", "description": "The filter to apply to the search"},
+				"collectionName":  map[string]any{"type": "string", "description": "The name of the collection to search in"},
+				"query":           map[string]any{"type": "string", "description": "The query to search for"},
+				"limit":           map[string]any{"type": "integer", "description": "The limit of documents to return"},
+				"filter":          map[string]any{"type": "string", "description": "The filter to apply to the search"},
 				"score_threshold": map[string]any{"type": "number", "description": "Minimum similarity score (0-1). Higher = stricter matching. Use 0.3-0.5 for broad searches, 0.5-0.7 for moderate, 0.7+ for exact. Omit to use default (0.75)."},
 			},
 			"required": []string{"collectionName", "query", "limit"},
@@ -560,4 +571,22 @@ func (srv *Server) isLargeOperation(req *mcp.CallToolRequest) bool {
 	default:
 		return false
 	}
+}
+
+func (srv *Server) isReadOnlyTool(toolName string) bool {
+	return readOnlyTools[strings.ToLower(toolName)]
+}
+
+func (srv *Server) GetToolDefsForRole(role string) []llm.ToolDef {
+	if role == roleAdmin {
+		return srv.toolDefs
+	}
+
+	var guestDefs = make([]llm.ToolDef, 0, len(srv.toolDefs))
+	for _, tool := range srv.toolDefs {
+		if srv.isReadOnlyTool(tool.Name) {
+			guestDefs = append(guestDefs, tool)
+		}
+	}
+	return guestDefs
 }
