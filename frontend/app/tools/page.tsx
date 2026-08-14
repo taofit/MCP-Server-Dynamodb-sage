@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Copy, Check, Play, Loader2 } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 interface Tool {
   Name: string;
@@ -40,7 +41,7 @@ export default function ToolsPage() {
   const [loadingTools, setLoadingTools] = useState(true);
 
   useEffect(() => {
-    fetch("/api/tools")
+    apiFetch("/api/tools")
       .then((r) => r.json())
       .then((data: Tool[]) => {
         setTools(data);
@@ -65,7 +66,7 @@ export default function ToolsPage() {
     setResult("");
     try {
       const parsedArgs = JSON.parse(args);
-      const response = await fetch("/mcp", {
+      const response = await apiFetch("/mcp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

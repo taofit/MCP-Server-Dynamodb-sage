@@ -62,7 +62,7 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 		if output != nil {
 			cc = output.ConsumedCapacity
 		}
-		srv.sendAuditLog("query_table", args.TableName, "RCU", cc, err)
+		srv.sendAuditLog(ctx, "query_table", args.TableName, "RCU", cc, err)
 
 		return srv.errorResult(fmt.Sprintf("Error when querying table: %v", err)), nil, nil
 	}
@@ -95,7 +95,7 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 		itemsText += "\nNote: " + warning
 	}
 
-	srv.sendAuditLog("query_table", args.TableName, "RCU", output.ConsumedCapacity, nil)
+	srv.sendAuditLog(ctx, "query_table", args.TableName, "RCU", output.ConsumedCapacity, nil)
 
 	return srv.successResult(itemsText), nil, nil
 }
@@ -141,11 +141,11 @@ func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *
 		if output != nil {
 			cc = output.ConsumedCapacity
 		}
-		srv.sendAuditLog("put_item", args.TableName, "WCU", cc, err)
+		srv.sendAuditLog(ctx, "put_item", args.TableName, "WCU", cc, err)
 		return srv.errorResult(fmt.Sprintf("Error when putting item to table %s: %v", args.TableName, err)), nil, nil
 	}
 	recordConsumedCapacity("put_item", args.TableName, "WCU", output.ConsumedCapacity)
-	srv.sendAuditLog("put_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
+	srv.sendAuditLog(ctx, "put_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
 	srv.recordNotification(args.TableName, "put_item", "success", "Item put successfully")
 	return srv.successResult(fmt.Sprintf("Successfully put item into table %s", args.TableName)), nil, nil
@@ -187,7 +187,7 @@ func (srv *Server) listTables(ctx context.Context, req *mcp.CallToolRequest, arg
 	for paginator.HasMorePages() {
 		out, err := paginator.NextPage(ctx)
 		if err != nil {
-			srv.sendAuditLog("list_tables", "", "", nil, err)
+			srv.sendAuditLog(ctx, "list_tables", "", "", nil, err)
 			return srv.errorResult(fmt.Sprintf("Error when listing tables: %v", err)), nil, nil
 		}
 		allTables = append(allTables, out.TableNames...)
@@ -197,7 +197,7 @@ func (srv *Server) listTables(ctx context.Context, req *mcp.CallToolRequest, arg
 	if tables == "" {
 		tables = "(no tables found)"
 	}
-	srv.sendAuditLog("list_tables", "", "", nil, nil)
+	srv.sendAuditLog(ctx, "list_tables", "", "", nil, nil)
 
 	return srv.successResult(fmt.Sprintf("DynamoDB Tables: %s", tables)), nil, nil
 }
@@ -209,7 +209,7 @@ func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, 
 		})
 	})
 	if err != nil {
-		srv.sendAuditLog("describe_table", args.TableName, "", nil, err)
+		srv.sendAuditLog(ctx, "describe_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("Error when describing table %s: %v", args.TableName, err)), nil, nil
 	}
 	var tableName = "Unknown"
@@ -268,7 +268,7 @@ func (srv *Server) describeTable(ctx context.Context, req *mcp.CallToolRequest, 
 	if len(lsis) > 0 {
 		details += fmt.Sprintf("Local Secondary Indexes (LSIs): \n%s", strings.Join(lsis, ""))
 	}
-	srv.sendAuditLog("describe_table", args.TableName, "", nil, nil)
+	srv.sendAuditLog(ctx, "describe_table", args.TableName, "", nil, nil)
 	return srv.successResult(details), nil, nil
 }
 
@@ -320,7 +320,7 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 		if out != nil {
 			cc = out.ConsumedCapacity
 		}
-		srv.sendAuditLog("scan_table", args.TableName, "RCU", cc, err)
+		srv.sendAuditLog(ctx, "scan_table", args.TableName, "RCU", cc, err)
 		return srv.errorResult(fmt.Sprintf("Error when scanning table %s: %v", args.TableName, err)), nil, nil
 	}
 
@@ -355,7 +355,7 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 		itemsText += "\nNote: " + warning
 	}
 
-	srv.sendAuditLog("scan_table", args.TableName, "RCU", out.ConsumedCapacity, nil)
+	srv.sendAuditLog(ctx, "scan_table", args.TableName, "RCU", out.ConsumedCapacity, nil)
 
 	return srv.successResult(itemsText), nil, nil
 }
@@ -433,7 +433,7 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 				ccList = append(ccList, output.ConsumedCapacity...)
 			}
 			if err != nil {
-				srv.sendAuditLog("batch_put_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), err)
+				srv.sendAuditLog(ctx, "batch_put_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), err)
 				return srv.errorResult(fmt.Sprintf("Error when batch putting items to table %s: %v", args.TableName, err)), nil, nil
 			}
 			if len(output.UnprocessedItems) > 0 {
@@ -449,7 +449,7 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 			}
 		}
 	}
-	srv.sendAuditLog("batch_put_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), nil)
+	srv.sendAuditLog(ctx, "batch_put_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), nil)
 
 	if totalUnprocessed > 0 {
 		unprocessedItemMsg = fmt.Sprintf("\nWarning: %d items were not processed due to provisioned throughput exceeded when batch putting items to table %s.", totalUnprocessed, args.TableName)
@@ -531,7 +531,7 @@ func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolReques
 				ccList = append(ccList, output.ConsumedCapacity...)
 			}
 			if err != nil {
-				srv.sendAuditLog("batch_delete_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), err)
+				srv.sendAuditLog(ctx, "batch_delete_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), err)
 				return srv.errorResult(fmt.Sprintf("Error when batch deleting items from table %s: %v", args.TableName, err)), nil, nil
 			}
 			if len(output.UnprocessedItems) > 0 {
@@ -552,7 +552,7 @@ func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolReques
 		unprocessedItemMsg = fmt.Sprintf("\nWarning: %d items were not deleted due to provisioned throughput constraints from table %s.", totalUnprocessed, args.TableName)
 	}
 
-	srv.sendAuditLog("batch_delete_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), nil)
+	srv.sendAuditLog(ctx, "batch_delete_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), nil)
 
 	return srv.successResult(fmt.Sprintf("Successfully deleted %d items from table %s%s", len(args.Keys)-totalUnprocessed, args.TableName, unprocessedItemMsg)), nil, nil
 }
@@ -592,12 +592,12 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		if output != nil {
 			consumedCapacity = output.ConsumedCapacity
 		}
-		srv.sendAuditLog("delete_item", args.TableName, "WCU", consumedCapacity, err)
+		srv.sendAuditLog(ctx, "delete_item", args.TableName, "WCU", consumedCapacity, err)
 		return srv.errorResult(fmt.Sprintf("Error when deleting item %v from table %s: %v", args.Key, args.TableName, err)), nil, nil
 	}
 	recordConsumedCapacity("delete_item", args.TableName, "WCU", output.ConsumedCapacity)
 
-	srv.sendAuditLog("delete_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
+	srv.sendAuditLog(ctx, "delete_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
 	if len(output.Attributes) == 0 {
 		keyJSON, _ := json.Marshal(args.Key)
@@ -638,7 +638,7 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 		if output != nil {
 			consumedCapacity = output.ConsumedCapacity
 		}
-		srv.sendAuditLog("get_item", args.TableName, "RCU", consumedCapacity, err)
+		srv.sendAuditLog(ctx, "get_item", args.TableName, "RCU", consumedCapacity, err)
 		return srv.errorResult(fmt.Sprintf("Error when getting item from table %s: %v", args.TableName, err)), nil, nil
 	}
 	recordConsumedCapacity("get_item", args.TableName, "RCU", output.ConsumedCapacity)
@@ -654,7 +654,7 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 	scrubbedItem := scrubbedItems[0]
 	itemJSON, _ := json.Marshal(scrubbedItem)
 
-	srv.sendAuditLog("get_item", args.TableName, "RCU", output.ConsumedCapacity, nil)
+	srv.sendAuditLog(ctx, "get_item", args.TableName, "RCU", output.ConsumedCapacity, nil)
 
 	return srv.successResult(fmt.Sprintf("Successfully got item with key %s from table %s: %s", string(keyJSON), args.TableName, string(itemJSON))), nil, nil
 }
@@ -745,11 +745,11 @@ func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, arg
 		if output != nil {
 			cc = output.ConsumedCapacity
 		}
-		srv.sendAuditLog("update_item", args.TableName, "WCU", cc, err)
+		srv.sendAuditLog(ctx, "update_item", args.TableName, "WCU", cc, err)
 		return srv.errorResult(fmt.Sprintf("Error when updating item %v from table %s: %v", args.Key, args.TableName, err)), nil, nil
 	}
 	recordConsumedCapacity("update_item", args.TableName, "WCU", output.ConsumedCapacity)
-	srv.sendAuditLog("update_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
+	srv.sendAuditLog(ctx, "update_item", args.TableName, "WCU", output.ConsumedCapacity, nil)
 
 	var attributes map[string]any
 	var scrubbedItem map[string]any
@@ -825,7 +825,7 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 				ccList = append(ccList, output.ConsumedCapacity...)
 			}
 			if err != nil {
-				srv.sendAuditLog("batch_get_items", args.TableName, "RCU", srv.aggregateConsumedCapacity(ccList), err)
+				srv.sendAuditLog(ctx, "batch_get_items", args.TableName, "RCU", srv.aggregateConsumedCapacity(ccList), err)
 				return srv.errorResult(fmt.Sprintf("Error when batch getting items from table %s: %v", args.TableName, err)), nil, nil
 			}
 			outputResponse = append(outputResponse, output.Responses[args.TableName]...)
@@ -846,7 +846,7 @@ func (srv *Server) batchGetItems(ctx context.Context, req *mcp.CallToolRequest, 
 		}
 	}
 
-	srv.sendAuditLog("batch_get_items", args.TableName, "RCU", srv.aggregateConsumedCapacity(ccList), nil)
+	srv.sendAuditLog(ctx, "batch_get_items", args.TableName, "RCU", srv.aggregateConsumedCapacity(ccList), nil)
 
 	if len(unprocessedKeys) > 0 {
 		var failedList []map[string]any
@@ -952,11 +952,11 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 		})
 	})
 	if err != nil {
-		srv.sendAuditLog("create_optimized_table", args.TableName, "", nil, err)
+		srv.sendAuditLog(ctx, "create_optimized_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("CreateTable %s failed: %v", args.TableName, err)), nil, nil
 	}
 	attributeDefinitions := srv.getAttributeDefinitions(output.TableDescription.AttributeDefinitions)
-	srv.sendAuditLog("create_optimized_table", args.TableName, "", nil, nil)
+	srv.sendAuditLog(ctx, "create_optimized_table", args.TableName, "", nil, nil)
 
 	return srv.successResult(fmt.Sprintf("Successfully created table \"%s\"\n Attribute definitions: %s", args.TableName, strings.Join(attributeDefinitions, ", "))), nil, nil
 }
@@ -1030,7 +1030,7 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 		return srv.db.UpdateTable(ctx, input)
 	})
 	if err != nil {
-		srv.sendAuditLog("update_table", args.TableName, "", nil, err)
+		srv.sendAuditLog(ctx, "update_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("Failed to update table %s: %v", args.TableName, err)), nil, nil
 	}
 
@@ -1040,12 +1040,12 @@ func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, ar
 			return srv.errorResult(fmt.Sprintf("UpdateTable %s did not return a table ARN", args.TableName)), nil, nil
 		}
 		if err := srv.tagTable(ctx, args.TableName, *output.TableDescription.TableArn, tags); err != nil {
-			srv.sendAuditLog("update_table", args.TableName, "", nil, err)
+			srv.sendAuditLog(ctx, "update_table", args.TableName, "", nil, err)
 			return srv.errorResult(fmt.Sprintf("UpdateTable %s succeeded, but TagResource failed: %v", args.TableName, err)), nil, nil
 		}
 	}
 
-	srv.sendAuditLog("update_table", args.TableName, "", nil, nil)
+	srv.sendAuditLog(ctx, "update_table", args.TableName, "", nil, nil)
 
 	if len(tags) > 0 {
 		srv.recordNotification(args.TableName, "update_table", "success", fmt.Sprintf("Successfully updated table \"%s\"\n Table status: %v\n Tags applied: %s", args.TableName, output.TableDescription.TableStatus, tagSummary(tags)))
@@ -1112,10 +1112,10 @@ func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, ar
 		})
 	})
 	if err != nil {
-		srv.sendAuditLog("delete_table", args.TableName, "", nil, err)
+		srv.sendAuditLog(ctx, "delete_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("DeleteTable %s failed: %v", args.TableName, err)), nil, nil
 	}
-	srv.sendAuditLog("delete_table", args.TableName, "", nil, nil)
+	srv.sendAuditLog(ctx, "delete_table", args.TableName, "", nil, nil)
 	srv.recordNotification(args.TableName, "delete_table", "success", fmt.Sprintf("Successfully deleted table %s", args.TableName))
 
 	return srv.successResult(fmt.Sprintf("Successfully deleted table %s", args.TableName)), nil, nil
@@ -1165,7 +1165,7 @@ func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest,
 		return srv.db.UpdateTimeToLive(ctx, input)
 	})
 	if err != nil {
-		srv.sendAuditLog("update_table_ttl", args.TableName, "", nil, err)
+		srv.sendAuditLog(ctx, "update_table_ttl", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("UpdateTableTTL %s failed: %v", args.TableName, err)), nil, nil
 	}
 	ttlStatus := "Unknown"
@@ -1177,7 +1177,7 @@ func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest,
 	if ttlOutput != nil && ttlOutput.TimeToLiveDescription != nil {
 		ttlStatus = string(ttlOutput.TimeToLiveDescription.TimeToLiveStatus)
 	}
-	srv.sendAuditLog("update_table_ttl", args.TableName, "", nil, nil)
+	srv.sendAuditLog(ctx, "update_table_ttl", args.TableName, "", nil, nil)
 	return srv.successResult(fmt.Sprintf("Successfully updated table %s TTL status to %s", args.TableName, ttlStatus)), nil, nil
 }
 
@@ -1228,7 +1228,7 @@ func (srv *Server) ingestDocument(ctx context.Context, req *mcp.CallToolRequest,
 			return srv.db.Scan(ctx, input)
 		})
 		if err != nil {
-			srv.sendAuditLog("scan_table", args.TableName, "", nil, err)
+			srv.sendAuditLog(ctx, "scan_table", args.TableName, "", nil, err)
 			return srv.errorResult(fmt.Sprintf("Scan %s failed: %v", args.TableName, err)), nil, nil
 		}
 		for _, item := range result.Items {
@@ -1347,21 +1347,27 @@ func (srv *Server) validateSchema(tableName string, av map[string]types.Attribut
 	return nil
 }
 
-func (srv *Server) generateAuditEntry(operation string, tableName string, consumedCapacity float64, capacityType string, status string) audit.AuditEntry {
+func (srv *Server) generateAuditEntry(ctx context.Context, operation string, tableName string, consumedCapacity float64, capacityType string, status string) audit.AuditEntry {
 	msg := fmt.Sprintf("%s performed on table %s with status %s", operation, tableName, status)
+	user := srv.userID
+	arn := srv.userARN
+	if role, ok := getUserRoleFromContext(ctx); ok {
+		user = role
+		arn = "token:" + role
+	}
 	return audit.AuditEntry{
 		Timestamp:             time.Now(),
 		Operation:             operation,
 		TableName:             tableName,
-		User:                  srv.userID,
+		User:                  user,
 		CapacityUnitsConsumed: consumedCapacity,
 		CapacityType:          capacityType,
 		Status:                status,
-		Message:               fmt.Sprintf("%s [user: %s, ARN: %s]", msg, srv.userID, srv.userARN),
+		Message:               fmt.Sprintf("%s [user: %s, ARN: %s]", msg, user, arn),
 	}
 }
 
-func (srv *Server) sendAuditLog(operation string, tableName string, capacityType string, consumedCapacity *types.ConsumedCapacity, err error) {
+func (srv *Server) sendAuditLog(ctx context.Context, operation string, tableName string, capacityType string, consumedCapacity *types.ConsumedCapacity, err error) {
 	status := "success"
 	if err != nil {
 		status = "error"
@@ -1370,7 +1376,7 @@ func (srv *Server) sendAuditLog(operation string, tableName string, capacityType
 	if consumedCapacity != nil && consumedCapacity.CapacityUnits != nil {
 		consumedCapacityUnits = *consumedCapacity.CapacityUnits
 	}
-	srv.RecordActionLog(srv.auditLog, srv.generateAuditEntry(operation, tableName, consumedCapacityUnits, capacityType, status))
+	srv.RecordActionLog(srv.auditLog, srv.generateAuditEntry(ctx, operation, tableName, consumedCapacityUnits, capacityType, status))
 }
 
 func status(err error) string {

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { useNotificationsStore, Notification } from "@/store/notifications";
+import { sseUrl } from "@/lib/api";
 
 export function SSEProvider({ children }: { children: React.ReactNode }) {
   const fetchNotifications = useNotificationsStore((s) => s.fetchNotifications);
@@ -14,7 +15,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
       const sseBase = typeof window !== "undefined" && window.location.hostname === "localhost"
         ? (process.env.NEXT_PUBLIC_SSE_URL || "http://localhost:8081")
         : "";
-      const evtSource = new EventSource(sseBase + "/api/events");
+      const evtSource = new EventSource(sseUrl(sseBase + "/api/events"));
 
       evtSource.onmessage = (event) => {
         try {

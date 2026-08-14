@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch } from "@/lib/api";
 
 type HealthStatus = "ok" | "error" | "not_configured";
 
@@ -88,17 +89,17 @@ export default function OverviewPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/health")
+      apiFetch("/api/health")
         .then((r) => r.json())
         .then(setHealth)
         .catch(() =>
           setHealth({ dynamodb: "error", kafka: "error", llm: "error" })
         ),
-      fetch("/api/stats")
+      apiFetch("/api/stats")
         .then((r) => r.json())
         .then(setStats)
         .catch(() => {}),
-      fetch("/api/notifications")
+      apiFetch("/api/notifications")
         .then((r) => r.json())
         .then((data: Notification[]) => setRecentActivity(data.slice(0, 8)))
         .catch(() => {}),
