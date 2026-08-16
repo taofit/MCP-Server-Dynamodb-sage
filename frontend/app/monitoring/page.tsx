@@ -397,8 +397,22 @@ export default function MonitoringPage() {
   const toolErrorsByOp = sumByLabel(metrics, "sage_mcp_tool_errors_total", "tool");
   const dynamoOpsByOp = sumByLabel(metrics, "sage_dynamodb_operation_total", "operation");
   const kafkaSends = sumMetrics(metrics, "sage_kafka_send_total");
+  const kafkaSendByStatus = sumByLabel(
+    metrics,
+    "sage_kafka_send_total",
+    "status"
+  );
+  const kafkaSendErrors = kafkaSendByStatus["error"] ?? 0;
   const kafkaBytes = sumMetrics(metrics, "sage_kafka_send_bytes_total");
   const kafkaLag = sumGaugeByLabel(metrics, "sage_kafka_consumer_lag", "partition");
+  const kafkaProcessedByStatus = sumByLabel(
+    metrics,
+    "sage_kafka_processed_total",
+    "status"
+  );
+  const kafkaProcessed = kafkaProcessedByStatus["success"] ?? 0;
+  const kafkaProcessErrors = kafkaProcessedByStatus["error"] ?? 0;
+  const kafkaFailures = kafkaSendErrors + kafkaProcessErrors;
   const riskBlocked = getMetric(metrics, "sage_risk_analysis_blocked_total");
   const riskConfirmed = getMetric(metrics, "sage_risk_analysis_confirmed_total");
   const piiDetected = getMetric(metrics, "sage_risk_pii_detected_total");
@@ -440,7 +454,7 @@ export default function MonitoringPage() {
       </div>
 
       {/* Key Metrics Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         <MetricCard
           label="Latency p95"
           value={formatDuration(latencyP95)}
@@ -469,6 +483,20 @@ export default function MonitoringPage() {
           icon={Server}
           color="text-violet-500"
           sub={`${heapAlloc > 0 ? formatBytes(heapAlloc) : "—"} heap`}
+        />
+        <MetricCard
+          label="Kafka Failures"
+          value={kafkaFailures}
+          icon={MessageSquare}
+          color={kafkaFailures > 0 ? "text-red-500" : "text-emerald-500"}
+          alert={kafkaFailures > 0}
+          sub={
+            kafkaFailures > 0
+              ? `${kafkaSendErrors} send, ${kafkaProcessErrors} process`
+              : kafkaSends > 0
+              ? "no failures"
+              : "not configured"
+          }
         />
         <MetricCard
           label="Kafka Lag"
@@ -758,20 +786,40 @@ export default function MonitoringPage() {
       )}
 
       {/* Kafka */}
-      {kafkaSends > 0 && (
+      {(kafkaSends > 0 || kafkaFailures > 0 || kafkaProcessed > 0) && (
         <Section title="Kafka" defaultOpen={false}>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div
+              className={`text-center p-3 rounded-lg bg-accent/50 ${
+                kafkaFailures > 0 ? "ring-1 ring-red-500/40" : ""
+              }`}
+            >
+              <p className="text-2xl font-bold text-red-500">{kafkaFailures}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Failures (send + process)
+              </p>
+            </div>
             <div className="text-center p-3 rounded-lg bg-accent/50">
               <p className="text-2xl font-bold text-violet-500">
                 {kafkaSends.toLocaleString()}
               </p>
-              <p className="text-xs text-muted-foreground mt-1">Messages Sent</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Messages Sent ({kafkaSendErrors} errors)
+              </p>
             </div>
             <div className="text-center p-3 rounded-lg bg-accent/50">
               <p className="text-2xl font-bold text-violet-500">
                 {formatBytes(kafkaBytes)}
               </p>
               <p className="text-xs text-muted-foreground mt-1">Data Sent</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-accent/50">
+              <p className="text-2xl font-bold text-violet-500">
+                {kafkaProcessed.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Processed ({kafkaProcessErrors} errors)
+              </p>
             </div>
             <div className="text-center p-3 rounded-lg bg-accent/50">
               <p className="text-2xl font-bold text-violet-500">{kafkaLag}</p>

@@ -4,6 +4,7 @@ const isExport = process.env.EXPORT_STATIC === "true";
 
 const nextConfig: NextConfig = {
   ...(isExport ? { output: "export" as const } : {}),
+  allowedDevOrigins: ["192.168.0.30"],
   images: { unoptimized: true },
   ...(!isExport
     ? {

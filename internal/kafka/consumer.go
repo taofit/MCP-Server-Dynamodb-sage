@@ -78,6 +78,9 @@ func (c *saramaConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 			if ok && handler != nil {
 				if err := handler(string(message.Key), message.Value); err != nil {
 					log.Printf("Error processing task key=%s: %v", string(message.Key), err)
+					metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "error").Inc()
+				} else {
+					metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "success").Inc()
 				}
 			}
 			session.MarkMessage(message, "")
