@@ -12,9 +12,13 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     function connect() {
-      const sseBase = typeof window !== "undefined" && window.location.hostname === "localhost"
-        ? (process.env.NEXT_PUBLIC_SSE_URL || "http://localhost:8081")
-        : "";
+      const sseBase =
+        process.env.NEXT_PUBLIC_SSE_URL ||
+        (typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1")
+          ? "http://localhost:8081"
+          : `http://${window.location.hostname}:8081`);
       const evtSource = new EventSource(sseUrl(sseBase + "/api/events"));
 
       evtSource.onmessage = (event) => {

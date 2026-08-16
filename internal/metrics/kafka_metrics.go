@@ -34,4 +34,11 @@ var (
 		Name:      "consumer_lag",
 		Help:      "Consumer lag per partition",
 	}, []string{"topic", "partition"})
+
+	KafkaProcessedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "sage",
+		Subsystem: "kafka",
+		Name:      "processed_total",
+		Help:      "Total Kafka messages processed by the consumer by status",
+	}, []string{"topic", "status"})
 )
