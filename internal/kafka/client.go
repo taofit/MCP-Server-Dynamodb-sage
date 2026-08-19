@@ -15,7 +15,7 @@ func NewClient(kafkaConfig *KafkaConfig) (*Client, error) {
 	producerConfig := &saramaProducerConfig{
 		brokers: kafkaConfig.Brokers,
 	}
-	p, err := newProducer(producerConfig)
+	p, err := newProducer(producerConfig, kafkaConfig.DLQ.Topic)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create producer: %v", err)
 	}
@@ -25,12 +25,22 @@ func NewClient(kafkaConfig *KafkaConfig) (*Client, error) {
 			topics = append(topics, topic)
 		}
 	}
+	if kafkaConfig.DLQ.Topic != "" {
+		topics = append(topics, kafkaConfig.DLQ.Topic)
+	}
 
 	c, err := newConsumer(&consumerConfig{
 		brokers:           kafkaConfig.Brokers,
 		topics:            topics,
 		consumerGroupName: kafkaConfig.ConsumerGroupName,
-	})
+		dlq: DLQConfig{
+			Topic:             kafkaConfig.DLQ.Topic,
+			MaxRetries:        kafkaConfig.DLQ.MaxRetries,
+			InitialBackoff:    kafkaConfig.DLQ.InitialBackoff,
+			MaxBackoff:        kafkaConfig.DLQ.MaxBackoff,
+			BackoffMultiplier: kafkaConfig.DLQ.BackoffMultiplier,
+		},
+	}, p)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consumer: %v", err)
 	}
@@ -63,7 +73,7 @@ func (c *Client) Ping() error {
 	}
 	producer, err := newProducer(&saramaProducerConfig{
 		brokers: c.Config.Brokers,
-	})
+	}, c.Config.DLQ.Topic)
 	if err != nil {
 		return fmt.Errorf("failed to create sync producer: %v", err)
 	}

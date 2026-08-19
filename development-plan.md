@@ -70,6 +70,7 @@ MCP Client (Claude/Cursor/etc)
    - **PII / security violation detection** — an analytics consumer that inspects mutation payloads for raw PII or unencrypted secrets and emits live alerts.
    - **AI agent reaction** — surfacing security alerts to the LLM agent's context window so it can autonomously propose remediation (e.g., `delete_item` to wipe exposed records).
    - **Multi-channel notifications** — extend `SendNotification` beyond macOS to UI, Slack, email, or webhook sinks (configurable per severity). See `server/notification.go:24` TODO.
+   - [x] **Dead Letter Queue (DLQ) & retry policy** — prevent poison pill messages from clogging the consumer pipeline. Implement exponential backoff with jitter for transient errors (DynamoDB throttling), route permanently failed messages to `dynamodb-sage-dlq` topic after max retries, and ensure the consumer group commits offsets and continues processing. Add metrics (`kafka_dlq_messages_total`) and audit logging for observability.
 
    **Reliability & correctness — follow-ups from Kafka article review**
 

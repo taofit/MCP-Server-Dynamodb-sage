@@ -6,3 +6,9 @@ topics:
   notifications: dynamodb-sage-notifications
 consumerGroupName: dynamodb-sage-workers
 partitions: 3
+dlq:
+  topic: dynamodb-sage-dlq
+  maxRetries: 3
+  initialBackoff: 1s
+  maxBackoff: 30s
+  backoffMultiplier: 2.0

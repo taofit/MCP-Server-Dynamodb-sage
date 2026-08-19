@@ -86,7 +86,7 @@ echo "=== Step 5: Create deployment tarball ==="
 rm -rf "$DEPLOY_DIR" "$TARBALL"
 mkdir -p "$DEPLOY_DIR"
 # Copy project files (excluding heavy/unnecessary dirs)
-rsync -a --exclude='.git' --exclude='keys' --exclude='data' --exclude='terraform' --exclude='*.tar.gz' --exclude='dynamo-sage' --exclude='dynamodb-sage' --exclude='*.md' --exclude='.gopls.toml' --exclude='opencode.json' --exclude='.vscode' "$DIR/" "$DEPLOY_DIR/"
+rsync -a --exclude='.git' --exclude='keys' --exclude='data' --exclude='terraform' --exclude='*.tar.gz' --exclude='dynamo-sage' --exclude='dynamodb-sage' --exclude='*.md' --exclude='.gopls.toml' --exclude='opencode.json' --exclude='.vscode' --exclude='node_modules' --exclude='.next' --exclude='frontend/out' --exclude='data' --exclude='.DS_Store' "$DIR/" "$DEPLOY_DIR/"
 # Add pre-built binary and release Dockerfile
 cp "/tmp/${APP_NAME}" "$DEPLOY_DIR/${APP_NAME}"
 cp "$DIR/Dockerfile.release" "$DEPLOY_DIR/Dockerfile"

@@ -41,4 +41,11 @@ var (
 		Name:      "processed_total",
 		Help:      "Total Kafka messages processed by the consumer by status",
 	}, []string{"topic", "status"})
+
+	KafkaRetryCount = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "sage",
+		Subsystem: "kafka",
+		Name:      "retry_count",
+		Help:      "Total Kafka messages retried by the consumer",
+	}, []string{"topic", "retry_count"})
 )
