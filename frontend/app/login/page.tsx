@@ -148,7 +148,16 @@ export default function LoginPage() {
           </form>
 
           <p className="text-xs text-muted-foreground text-center mt-6">
-            Tokens are issued by your DynamoDB Sage administrator.
+            Contact{" "}
+            <a
+              href="mailto:tao_sun@hotmail.com"
+              className="underline hover:text-foreground"
+            >
+              tao_sun@hotmail.com
+            </a>{" "}
+            to request an access key.
+            <br />
+            Demo mode provides guest (read-only) access.
           </p>
         </div>
       </div>

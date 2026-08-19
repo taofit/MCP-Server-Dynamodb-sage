@@ -106,6 +106,10 @@ MCP Client (Claude / Cursor / opencode)
 
 *Full architecture + RAG deep-dive: [docs/architecture.md](docs/architecture.md)*
 
+### Execution Flow
+
+![Async Job Lifecycle](async-job-lifecycle.png)
+
 ---
 
 ## Documentation

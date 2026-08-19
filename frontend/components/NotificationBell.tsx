@@ -53,7 +53,7 @@ export function NotificationBell() {
     (n, i) => !readIds.includes(notifId(n, i))
   ).length;
 
-  const recent = (notifications ?? []).slice(0, MAX_DISPLAYED);
+  const recent = [...new Map((notifications ?? []).slice(0, MAX_DISPLAYED).map((n, i) => [notifId(n, i), n])).values()];
 
   return (
     <DropdownMenu>

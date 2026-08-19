@@ -4,12 +4,20 @@ import (
 	"database/sql"
 	"dynamodb-sage/internal/notification"
 	"fmt"
+	"log"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
 
+type writeOp struct {
+	execute func(db *sql.DB) error
+	done    chan error
+}
+
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	writeCh chan writeOp
 }
 
 type ChatMessage struct {
@@ -51,30 +59,61 @@ func NewStore(dbPath string) (*Store, error) {
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL;`); err != nil {
 		return nil, err
 	}
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000;`); err != nil {
+		return nil, err
+	}
 	if _, err := db.Exec(queryNotification); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(queryChatHistory); err != nil {
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	s := &Store{db: db, writeCh: make(chan writeOp, 100)}
+	go s.writerLoop()
+	return s, nil
+}
+
+func (s *Store) writerLoop() {
+	for op := range s.writeCh {
+		op.done <- op.execute(s.db)
+	}
+}
+
+func (s *Store) asyncWrite(executor func(db *sql.DB) error) {
+	select {
+	case s.writeCh <- writeOp{execute: executor, done: make(chan error, 1)}:
+	default:
+		log.Printf("Write channel full, dropping write")
+	}
+}
+
+func (s *Store) syncWrite(executor func(db *sql.DB) error) error {
+	op := writeOp{execute: executor, done: make(chan error, 1)}
+	select {
+	case s.writeCh <- op:
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("write channel timeout")
+	}
+	return <-op.done
 }
 
 func (s *Store) GetDB() *sql.DB {
 	return s.db
 }
 
-func (s *Store) AddNotification(n notification.NotificationPayload) error {
-	title := n.Operation
-	if title == "" {
-		title = "Unknown"
-	}
-	_, err := s.db.Exec(`INSERT INTO notifications (title, job_id, table_name, severity, operation, message, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`, title, n.JobID, n.Table, n.Severity, n.Operation, n.Message, n.Timestamp)
-	if err != nil {
+func (s *Store) AddNotification(n notification.NotificationPayload) {
+	s.asyncWrite(func(db *sql.DB) error {
+		title := n.Operation
+		if title == "" {
+			title = "Unknown"
+		}
+		_, err := db.Exec(`INSERT INTO notifications (title, job_id, table_name, severity, operation, message, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`, title, n.JobID, n.Table, n.Severity, n.Operation, n.Message, n.Timestamp)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY timestamp DESC LIMIT ?)`, maxNotifications)
 		return err
-	}
-	_, err = s.db.Exec(`DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY timestamp DESC LIMIT ?)`, maxNotifications)
-	return err
+	})
 }
 
 func (s *Store) GetNotifications() ([]notification.NotificationPayload, error) {
@@ -98,13 +137,17 @@ func (s *Store) GetNotifications() ([]notification.NotificationPayload, error) {
 }
 
 func (s *Store) MarkNotificationAsRead(jobID string) error {
-	_, err := s.db.Exec(`UPDATE notifications SET read = TRUE WHERE job_id = ?`, jobID)
-	return err
+	return s.syncWrite(func(db *sql.DB) error {
+		_, err := db.Exec(`UPDATE notifications SET read = TRUE WHERE job_id = ?`, jobID)
+		return err
+	})
 }
 
 func (s *Store) AddChatHistory(user, toolName, content string, timestamp int64) error {
-	_, err := s.db.Exec(`INSERT INTO chat_history (user, tool_name, content, timestamp) VALUES (?, ?, ?, ?)`, user, toolName, content, timestamp)
-	return err
+	return s.syncWrite(func(db *sql.DB) error {
+		_, err := db.Exec(`INSERT INTO chat_history (user, tool_name, content, timestamp) VALUES (?, ?, ?, ?)`, user, toolName, content, timestamp)
+		return err
+	})
 }
 
 func (s *Store) countNotifications() (int, error) {
@@ -155,5 +198,6 @@ func (s *Store) GetChatHistory(limit int) ([]ChatMessage, error) {
 }
 
 func (s *Store) Close() {
+	close(s.writeCh)
 	s.db.Close()
 }

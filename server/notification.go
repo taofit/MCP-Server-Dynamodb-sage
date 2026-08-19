@@ -34,13 +34,10 @@ func (srv *Server) processNotification(key string, payload []byte) error {
 		return nil
 	}
 
-	srv.notificationService.SendMCPNotification(key, notf)
+	srv.notificationService.SendMCPNotification(notf)
 	srv.notificationService.SendUINotify(notf.Severity, notf.Message)
 	srv.broadcastToSSE(notf)
-	if err := srv.store.AddNotification(notf); err != nil {
-		log.Printf("Failed to store notification to SQLite: %v", err)
-		return err
-	}
+	srv.store.AddNotification(notf)
 	return nil
 }
 
@@ -70,7 +67,5 @@ func (srv *Server) recordNotification(table, operation, severity, message string
 		Timestamp: time.Now().Unix(),
 	}
 	srv.broadcastToSSE(notf)
-	if err := srv.store.AddNotification(notf); err != nil {
-		log.Printf("Failed to store notification: %v", err)
-	}
+	srv.store.AddNotification(notf)
 }

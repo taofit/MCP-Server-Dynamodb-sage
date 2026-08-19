@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -22,6 +23,13 @@ type JobResult struct {
 	Done      chan struct{}       `json:"done,omitempty"`
 	Error     error               `json:"error,omitempty"`
 	StartedAt time.Time           `json:"startedAt,omitempty"`
+	closeOnce sync.Once           `json:"-"`
+}
+
+func (jr *JobResult) Close() {
+	if jr != nil && jr.Done != nil {
+		jr.closeOnce.Do(func() { close(jr.Done) })
+	}
 }
 
 var readOnlyTools = map[string]bool{

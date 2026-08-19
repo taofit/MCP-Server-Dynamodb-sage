@@ -102,14 +102,17 @@ func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, arg
 
 func (srv *Server) putItem(ctx context.Context, req *mcp.CallToolRequest, args *PutItemArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "put_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "put_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(err.Error()), nil, nil
 	}
 
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "put_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table item cannot be put", err)), nil, nil
 	}
 
@@ -362,18 +365,23 @@ func (srv *Server) scanTable(ctx context.Context, req *mcp.CallToolRequest, args
 
 func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchPutItemsArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "batch_put_items", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "batch_put_items", args.TableName, "WCU", nil, err)
 		return srv.errorResult(err.Error()), nil, nil
 	}
 
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "batch_put_items", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table items cannot be put", err)), nil, nil
 	}
 
 	if len(args.Items) == 0 {
+		err := fmt.Errorf("no items to put into table %s", args.TableName)
+		srv.sendAuditLog(ctx, "batch_put_items", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("No items to put into table %s", args.TableName)), nil, nil
 	}
 
@@ -471,14 +479,17 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 
 func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolRequest, args *BatchDeleteItemsArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "batch_delete_items", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "batch_delete_items", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "batch_delete_items", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table items cannot be deleted", err)), nil, nil
 	}
 
@@ -559,10 +570,12 @@ func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolReques
 
 func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, args *DeleteItemArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "delete_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "delete_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
@@ -571,6 +584,7 @@ func (srv *Server) deleteItem(ctx context.Context, req *mcp.CallToolRequest, arg
 	}
 
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "delete_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table item cannot be deleted", err)), nil, nil
 	}
 	av, err := attributevalue.MarshalMap(args.Key)
@@ -661,14 +675,17 @@ func (srv *Server) getItem(ctx context.Context, req *mcp.CallToolRequest, args *
 
 func (srv *Server) updateItem(ctx context.Context, req *mcp.CallToolRequest, args *UpdateItemArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_item", args.TableName, "WCU", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table item cannot be updated", err)), nil, nil
 	}
 
@@ -963,14 +980,17 @@ func (srv *Server) createOptimizedTable(ctx context.Context, req *mcp.CallToolRe
 
 func (srv *Server) updateTable(ctx context.Context, req *mcp.CallToolRequest, args *UpdateTableArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("UpdateTable: %v", err)), nil, nil
 	}
 
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table cannot be updated", err)), nil, nil
 	}
 
@@ -1096,14 +1116,17 @@ func tagSummary(tags []types.Tag) string {
 
 func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, args *DeleteTableArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "delete_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("DeleteTable: %v", err)), nil, nil
 	}
 
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "delete_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "delete_table", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table cannot be deleted", err)), nil, nil
 	}
 	_, err := instrumentDynamoDB("delete_table", args.TableName, func() (*dynamodb.DeleteTableOutput, error) {
@@ -1123,14 +1146,17 @@ func (srv *Server) deleteTable(ctx context.Context, req *mcp.CallToolRequest, ar
 
 func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest, args *UpdateTableTTLArgs) (*mcp.CallToolResult, any, error) {
 	if err := srv.guardrail.ValidateProtectedTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_table_ttl", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("UpdateTable: %v", err)), nil, nil
 	}
 
 	if err := srv.guardrail.ValidateReadOnlyTable(args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_table_ttl", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v", err)), nil, nil
 	}
 
 	if err := srv.validateProtectedTag(ctx, args.TableName); err != nil {
+		srv.sendAuditLog(ctx, "update_table_ttl", args.TableName, "", nil, err)
 		return srv.errorResult(fmt.Sprintf("Validation error: %v; table cannot be modified", err)), nil, nil
 	}
 
@@ -1183,10 +1209,6 @@ func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest,
 
 func (srv *Server) getJobResult(ctx context.Context, req *mcp.CallToolRequest, args *GetJobResultArgs) (*mcp.CallToolResult, any, error) {
 	jobResult, ok := srv.jobStorage.Load(args.JobID)
-	defer func() {
-		srv.jobStorage.Delete(args.JobID)
-		metrics.JobStoragePending.Dec()
-	}()
 	if !ok {
 		return srv.errorResult(fmt.Sprintf("Job %s not found", args.JobID)), nil, nil
 	}
@@ -1586,8 +1608,7 @@ func (srv *Server) processHeavyOp(key string, payload []byte) error {
 	}
 	jobResult, ok := srv.jobStorage.Load(key)
 	if !ok {
-		log.Printf("job not found: %s", key)
-		return nil
+		return fmt.Errorf("job not found: %s", key)
 	}
 
 	jr, ok := jobResult.(*JobResult)
@@ -1650,10 +1671,8 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 	}{}
 	jobPayload.Operation = "unknown"
 	defer func() {
-		if jr != nil && jr.Done != nil {
-			instrumentHeavyJob(jobPayload.Operation, jr.StartedAt, jr.Error)
-			close(jr.Done)
-		}
+		instrumentHeavyJob(jobPayload.Operation, jr.StartedAt, jr.Error)
+		jr.Close()
 	}()
 	if err := json.Unmarshal(payload, &jobPayload); err != nil {
 		jr.Error = fmt.Errorf("failed to unmarshal job payload: %v", err)
@@ -1672,6 +1691,8 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 			result, _, err := srv.batchPutItems(ctx, req, &input)
 			if err != nil {
 				jr.Error = fmt.Errorf("failed to execute batch_put_items: %v", err)
+			} else if result != nil && result.IsError {
+				jr.Error = fmt.Errorf("batch_put_items returned error: %s", extractErrorText(result))
 			} else {
 				jr.Result = result
 			}
@@ -1684,6 +1705,8 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 			result, _, err := srv.batchDeleteItems(ctx, req, &input)
 			if err != nil {
 				jr.Error = fmt.Errorf("failed to execute batch_delete_items: %v", err)
+			} else if result != nil && result.IsError {
+				jr.Error = fmt.Errorf("batch_delete_items returned error: %s", extractErrorText(result))
 			} else {
 				jr.Result = result
 			}
@@ -1696,6 +1719,8 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 			result, _, err := srv.createOptimizedTable(ctx, req, &input)
 			if err != nil {
 				jr.Error = fmt.Errorf("failed to execute create_optimized_table: %v", err)
+			} else if result != nil && result.IsError {
+				jr.Error = fmt.Errorf("create_optimized_table returned error: %s", extractErrorText(result))
 			} else {
 				jr.Result = result
 			}
@@ -1708,6 +1733,8 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 			result, _, err := srv.ingestDocument(ctx, req, &input)
 			if err != nil {
 				jr.Error = fmt.Errorf("failed to execute ingest_document: %v", err)
+			} else if result != nil && result.IsError {
+				jr.Error = fmt.Errorf("ingest_document returned error: %s", extractErrorText(result))
 			} else {
 				jr.Result = result
 			}
@@ -1715,4 +1742,20 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 	default:
 		jr.Error = fmt.Errorf("unknown operation: %s", jobPayload.Operation)
 	}
+}
+
+func extractErrorText(result *mcp.CallToolResult) string {
+	if result == nil {
+		return "unknown error"
+	}
+	var texts []string
+	for _, c := range result.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			texts = append(texts, tc.Text)
+		}
+	}
+	if len(texts) == 0 {
+		return "unknown error"
+	}
+	return strings.Join(texts, "\n")
 }

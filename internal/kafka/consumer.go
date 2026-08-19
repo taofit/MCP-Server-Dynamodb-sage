@@ -2,8 +2,10 @@ package kafka
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -17,35 +19,42 @@ type Consumer interface {
 	Start() error
 	GracefulStop() error
 	RegisterHandler(topic string, handler Handler)
+	SetOnComplete(fn func(key string))
 }
 
 type Handler func(key string, payload []byte) error
 
 type saramaConsumer struct {
+	producer          Producer
 	ready             chan struct{}
 	handlersMu        sync.RWMutex
 	handlers          map[string]Handler
+	onComplete        func(key string)
 	brokers           []string
 	topics            []string
 	consumerGroupName string
 	consumerGroup     sarama.ConsumerGroup
 	runCancel         context.CancelFunc
 	wg                sync.WaitGroup
+	dlq               DLQConfig
 }
 
 type consumerConfig struct {
 	brokers           []string
 	topics            []string
 	consumerGroupName string
+	dlq               DLQConfig
 }
 
-func newConsumer(config *consumerConfig) (Consumer, error) {
+func newConsumer(config *consumerConfig, producer Producer) (Consumer, error) {
 	handlers := make(map[string]Handler)
 	return &saramaConsumer{
+		producer:          producer,
 		handlers:          handlers,
 		brokers:           config.brokers,
 		topics:            config.topics,
 		consumerGroupName: config.consumerGroupName,
+		dlq:               config.dlq,
 		ready:             make(chan struct{}, 1),
 	}, nil
 }
@@ -62,9 +71,15 @@ func (c *saramaConsumer) Cleanup(session sarama.ConsumerGroupSession) error {
 	return nil
 }
 
+func (c *saramaConsumer) SetOnComplete(fn func(key string)) {
+	c.onComplete = fn
+}
+
 func (c *saramaConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for {
 		select {
+		case <-session.Context().Done():
+			return session.Context().Err()
 		case message, ok := <-claim.Messages():
 			if !ok {
 				log.Printf("Message channel was closed")
@@ -72,20 +87,63 @@ func (c *saramaConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 			}
 			log.Printf("Message claimed: topic=%s key=%q", message.Topic, string(message.Key))
 			instrumentDuration(message, claim)
+
+			// Retrieve handler for the topic
 			c.handlersMu.RLock()
-			handler, ok := c.handlers[message.Topic]
+			handler, exists := c.handlers[message.Topic]
 			c.handlersMu.RUnlock()
-			if ok && handler != nil {
-				if err := handler(string(message.Key), message.Value); err != nil {
-					log.Printf("Error processing task key=%s: %v", string(message.Key), err)
-					metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "error").Inc()
-				} else {
-					metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "success").Inc()
+
+			if !exists || handler == nil {
+				// No handler registered, just acknowledge the message
+				session.MarkMessage(message, "")
+				metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "unhandled").Inc()
+				continue
+			}
+
+			// Process the message with retry logic
+			if err := c.processWithRetry(handler, message); err != nil {
+				// Attempt to send to DLQ on processing failure
+				dlqPayload := DLQPayload{
+					OriginalPayload: message.Value,
+					OriginalTopic:   message.Topic,
+					RetryCount:      c.dlq.MaxRetries,
+					ErrorMessage:    err.Error(),
 				}
+				dlqBytes, _ := json.Marshal(dlqPayload)
+				if dlqErr := c.producer.SendToDLQ(string(message.Key), dlqBytes); dlqErr != nil {
+					metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "dlq_error").Inc()
+					session.MarkMessage(message, "")
+					return dlqErr
+				}
+				metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "dlq").Inc()
+
+			}
+			if c.onComplete != nil {
+				c.onComplete(string(message.Key))
 			}
 			session.MarkMessage(message, "")
-		case <-session.Context().Done():
-			return session.Context().Err()
+		}
+	}
+}
+
+func (c *saramaConsumer) processWithRetry(handler Handler, message *sarama.ConsumerMessage) error {
+	retry := 0
+	for {
+		if err := handler(string(message.Key), message.Value); err != nil {
+			if retry >= c.dlq.MaxRetries {
+				return fmt.Errorf("max retries reached: %v", err)
+			}
+			metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "error").Inc()
+			delay := time.Duration(float64(c.dlq.InitialBackoff) * math.Pow(c.dlq.BackoffMultiplier, float64(retry)))
+			if delay > c.dlq.MaxBackoff {
+				delay = c.dlq.MaxBackoff
+			}
+			log.Printf("Error processing task key=%s: %v, retry=%d, delay=%s", string(message.Key), err, retry, delay)
+			time.Sleep(delay)
+			retry++
+		} else {
+			metrics.KafkaProcessedTotal.WithLabelValues(message.Topic, "success").Inc()
+			return nil
 		}
 	}
 }
@@ -96,6 +154,11 @@ func instrumentDuration(message *sarama.ConsumerMessage, claim sarama.ConsumerGr
 		if string(h.Key) == headerSendStart {
 			if ns, err := strconv.ParseInt(string(h.Value), 10, 64); err == nil {
 				sendStart = time.Unix(0, ns)
+			}
+		}
+		if string(h.Key) == headerRetryCount {
+			if count, err := strconv.ParseInt(string(h.Value), 10, 64); err == nil {
+				metrics.KafkaRetryCount.WithLabelValues(message.Topic, strconv.FormatInt(count, 10)).Inc()
 			}
 		}
 	}

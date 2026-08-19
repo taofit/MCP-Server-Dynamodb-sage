@@ -1,3 +1,4 @@
+// Package notification is for sending kafka notifications
 package notification
 
 import (
@@ -25,9 +26,9 @@ type SessionProvider interface {
 }
 
 type NotificationService struct {
-	kafkaClient       KafkaClient
+	kafkaClient        KafkaClient
 	notificationsTopic string
-	sessProvider      SessionProvider
+	sessProvider       SessionProvider
 }
 
 type JobPayload struct {
@@ -96,7 +97,7 @@ func (ntf *NotificationService) SendUINotify(severity, message string) {
 	}
 }
 
-func (ntf *NotificationService) SendMCPNotification(key string, notificationPayload NotificationPayload) error {
+func (ntf *NotificationService) SendMCPNotification(notificationPayload NotificationPayload) error {
 	var firstErr error
 	logLvl := logLevel(notificationPayload.Severity)
 	if ntf.sessProvider == nil {
