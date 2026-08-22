@@ -94,17 +94,6 @@ func (srv *Server) parseDLQPayload(payload []byte) (tableName string, operation 
 	return
 }
 
-func (srv *Server) sweepStaleClaims() {
-	n, err := srv.store.deleteStaleClaimedOps(time.Minute * 10)
-	if err != nil {
-		log.Printf("Failed to delete stale claimed ops: %v", err)
-		return
-	}
-	if n > 0 {
-		log.Printf("Deleted %d stale claimed ops", n)
-	}
-}
-
 func (srv *Server) auditTrail(tableName, operation string, payload []byte, key string, jobID string) {
 	if jobID == "" {
 		jobID = key
