@@ -431,7 +431,10 @@ export default function ChatPage() {
         <div className="flex gap-2 max-w-4xl mx-auto">
           {messages.length > 0 && (
             <button
-              onClick={clearMessages}
+              onClick={() => {
+                apiFetch("/api/chat", { method: "DELETE" }).catch(() => {});
+                clearMessages();
+              }}
               className="px-3 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:border-border transition-colors flex items-center"
               title="Clear chat"
             >

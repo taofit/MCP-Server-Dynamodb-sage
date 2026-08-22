@@ -5,6 +5,7 @@ import (
 	"dynamodb-sage/internal/audit"
 	"dynamodb-sage/internal/crypto"
 	"dynamodb-sage/internal/metrics"
+	"dynamodb-sage/internal/notification"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -18,6 +19,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+const JOBIDKEY contextKey = "job_id"
 
 func (srv *Server) queryTable(ctx context.Context, req *mcp.CallToolRequest, args *QueryTableArgs) (*mcp.CallToolResult, any, error) {
 	var startKey map[string]types.AttributeValue
@@ -422,6 +425,7 @@ func (srv *Server) batchPutItems(ctx context.Context, req *mcp.CallToolRequest, 
 		}
 		batchItems := items[start:end]
 		if err := srv.guardrail.ValidateBatchSize(batchItems); err != nil {
+			srv.sendAuditLog(ctx, "batch_put_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), err)
 			return srv.errorResult(fmt.Sprintf("Error when batch putting items to table %s: %v", args.TableName, err)), nil, nil
 		}
 		input := &dynamodb.BatchWriteItemInput{
@@ -494,13 +498,17 @@ func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolReques
 	}
 
 	if len(args.Keys) == 0 {
-		return srv.errorResult(fmt.Sprintf("No keys provided to delete from table %s", args.TableName)), nil, nil
+		err := fmt.Errorf("no keys provided to delete from table %s", args.TableName)
+		srv.sendAuditLog(ctx, "batch_delete_items", args.TableName, "WCU", nil, err)
+		return srv.errorResult(err.Error()), nil, nil
 	}
 	items := []types.WriteRequest{}
 	for _, key := range args.Keys {
 		av, err := attributevalue.MarshalMap(key)
 		if err != nil {
-			return srv.errorResult(fmt.Sprintf("Error when marshaling key %v from table %s: %v", key, args.TableName, err)), nil, nil
+			marshErr := fmt.Errorf("error when marshaling key %v from table %s: %v", key, args.TableName, err)
+			srv.sendAuditLog(ctx, "batch_delete_items", args.TableName, "WCU", nil, marshErr)
+			return srv.errorResult(marshErr.Error()), nil, nil
 		}
 
 		items = append(items, types.WriteRequest{
@@ -522,6 +530,7 @@ func (srv *Server) batchDeleteItems(ctx context.Context, req *mcp.CallToolReques
 		batchItems := items[start:end]
 
 		if err := srv.guardrail.ValidateBatchSize(batchItems); err != nil {
+			srv.sendAuditLog(ctx, "batch_delete_items", args.TableName, "WCU", srv.aggregateConsumedCapacity(ccList), err)
 			return srv.errorResult(fmt.Sprintf("Error when batch deleting items from table %s: %v", args.TableName, err)), nil, nil
 		}
 
@@ -1208,23 +1217,18 @@ func (srv *Server) updateTableTTL(ctx context.Context, req *mcp.CallToolRequest,
 }
 
 func (srv *Server) getJobResult(ctx context.Context, req *mcp.CallToolRequest, args *GetJobResultArgs) (*mcp.CallToolResult, any, error) {
-	jobResult, ok := srv.jobStorage.Load(args.JobID)
-	if !ok {
+	jobResultJSON, err := srv.store.getProcessedOpResult(args.JobID)
+	if err != nil {
 		return srv.errorResult(fmt.Sprintf("Job %s not found", args.JobID)), nil, nil
 	}
-	jr, ok := jobResult.(*JobResult)
-	if !ok {
-		return srv.errorResult(fmt.Sprintf("Job %s is not a JobResult", args.JobID)), nil, nil
+	if jobResultJSON == "" {
+		return srv.successResult(fmt.Sprintf("Job %s is being processed, please try again later", args.JobID)), nil, nil
 	}
-	select {
-	case <-ctx.Done():
-		return srv.errorResult("Context cancelled"), nil, nil
-	case <-jr.Done:
-		if jr.Error != nil {
-			return srv.errorResult(fmt.Sprintf("Job %s failed: %s", args.JobID, jr.Error.Error())), nil, nil
-		}
-		return jr.Result, nil, nil
+	var callResult mcp.CallToolResult
+	if err := json.Unmarshal([]byte(jobResultJSON), &callResult); err != nil {
+		return srv.errorResult(fmt.Sprintf("Error unmarshalling job result: %v", err)), nil, nil
 	}
+	return &callResult, nil, nil
 }
 
 func (srv *Server) ingestDocument(ctx context.Context, req *mcp.CallToolRequest, args *IngestDocumentArgs) (*mcp.CallToolResult, any, error) {
@@ -1377,6 +1381,10 @@ func (srv *Server) generateAuditEntry(ctx context.Context, operation string, tab
 		user = role
 		arn = "token:" + role
 	}
+	jobID := ""
+	if jobIDVal, ok := ctx.Value(JOBIDKEY).(string); ok {
+		jobID = jobIDVal
+	}
 	return audit.AuditEntry{
 		Timestamp:             time.Now(),
 		Operation:             operation,
@@ -1386,6 +1394,7 @@ func (srv *Server) generateAuditEntry(ctx context.Context, operation string, tab
 		CapacityType:          capacityType,
 		Status:                status,
 		Message:               fmt.Sprintf("%s [user: %s, ARN: %s]", msg, user, arn),
+		JobID:                 jobID,
 	}
 }
 
@@ -1603,62 +1612,86 @@ func (srv *Server) validateProtectedTag(ctx context.Context, tableName string) e
 func (srv *Server) processHeavyOp(key string, payload []byte) error {
 	payloadResult, err := srv.notificationService.ParsePayload(payload)
 	if err != nil {
-		srv.notificationService.SendNotification("unknown", "error", "unknown_operation", "", err.Error())
+		srv.notificationService.SendNotificationViaKafka("unknown", "error", "unknown_operation", "", err.Error())
 		return err
 	}
-	jobResult, ok := srv.jobStorage.Load(key)
-	if !ok {
-		return fmt.Errorf("job not found: %s", key)
+
+	isClaimed, err := srv.claimProcessedOp(key, payloadResult)
+	if err != nil {
+		return fmt.Errorf("error claiming processed op: %w", err)
+	}
+	if !isClaimed {
+		return nil
 	}
 
-	jr, ok := jobResult.(*JobResult)
-	if !ok {
-		return fmt.Errorf("job %s is not a JobResult", key)
-	}
+	jr := &JobResult{ID: key}
 	srv.executeJobOp(jr, payload)
 
 	if jr.Error != nil {
-		srv.notificationService.SendNotification(payloadResult.TableName, "error", payloadResult.Operation, payloadResult.InputHash, jr.Error.Error())
+		srv.notificationService.SendNotificationViaKafka(payloadResult.TableName, "error", payloadResult.Operation, payloadResult.InputHash, jr.Error.Error())
+		_, err := srv.store.deleteClaimedOp(jr.ID)
+		if err != nil {
+			log.Printf("warning: failed to delete claimed op: %v", err)
+		}
 		return jr.Error
 	}
-	srv.notificationService.SendNotification(payloadResult.TableName, "success", payloadResult.Operation, payloadResult.InputHash, srv.notificationService.ConstructMessage(payloadResult))
+	_, err = srv.completeProcessedOp(jr)
+	if err != nil {
+		log.Printf("warning: failed to save processed result, claim with ID: %s, error: %v", jr.ID, err)
+	}
+	srv.notificationService.SendNotificationViaKafka(payloadResult.TableName, "success", payloadResult.Operation, payloadResult.InputHash, srv.notificationService.ConstructMessage(payloadResult))
 
 	return nil
 }
 
-func (srv *Server) processHeavyOpForQueue(key string, payload []byte) error {
-	jobResult, ok := srv.jobStorage.Load(key)
-	if !ok {
-		return fmt.Errorf("job not found: %s", key)
+func (srv *Server) completeProcessedOp(jr *JobResult) (bool, error) {
+	resultJSON, err := json.Marshal(jr.Result)
+	if err != nil {
+		return false, err
 	}
-	jr, ok := jobResult.(*JobResult)
-	if !ok {
-		return fmt.Errorf("job %s is not a JobResult", key)
-	}
+	return srv.store.updateProcessedOpResult(jr.ID, string(resultJSON))
+}
 
+func (srv *Server) claimProcessedOp(jobID string, payloadResult notification.PayloadResult) (bool, error) {
+	claimed, err := srv.store.addProcessedOp(jobID, payloadResult.Operation, payloadResult.TableName, "")
+	if err != nil {
+		return false, fmt.Errorf("error getting processed op: %w", err)
+	}
+	return claimed, nil
+}
+
+func (srv *Server) processHeavyOpForQueue(key string, payload []byte) error {
 	jobPayload := struct {
 		Input     json.RawMessage `json:"input"`
 		Operation string          `json:"operation"`
 	}{}
 	if err := json.Unmarshal(payload, &jobPayload); err != nil {
-		jr.Error = fmt.Errorf("failed to unmarshal job payload: %v", err)
-		srv.recordNotification("unknown", jobPayload.Operation, "error", jr.Error.Error())
-		return jr.Error
+		return fmt.Errorf("failed to unmarshal job payload: %v", err)
 	}
 
-	// Extract table name from input
 	var tableName struct{ TableName string }
 	if err := json.Unmarshal(jobPayload.Input, &tableName); err != nil {
-		jr.Error = fmt.Errorf("failed to extract table name from input: %v", err)
-		srv.recordNotification("unknown", jobPayload.Operation, "error", jr.Error.Error())
-		return jr.Error
+		return fmt.Errorf("failed to extract table name from input: %v", err)
+	}
+	claimed, err := srv.claimProcessedOp(key, notification.PayloadResult{Operation: jobPayload.Operation, TableName: tableName.TableName})
+	if err != nil {
+		return fmt.Errorf("error claiming processed op: %w", err)
+	}
+	if !claimed {
+		return nil
 	}
 
+	jr := &JobResult{ID: key}
 	srv.executeJobOp(jr, payload)
 
 	if jr.Error != nil {
 		srv.recordNotification(tableName.TableName, jobPayload.Operation, "error", jr.Error.Error())
+		srv.store.deleteClaimedOp(jr.ID)
 		return jr.Error
+	}
+	_, err = srv.completeProcessedOp(jr)
+	if err != nil {
+		log.Printf("warning: failed to save processed result, claim with ID: %s, error: %v", jr.ID, err)
 	}
 	srv.recordNotification(tableName.TableName, jobPayload.Operation, "success", "completed")
 	return nil
@@ -1668,10 +1701,12 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 	jobPayload := struct {
 		Input     json.RawMessage `json:"input"`
 		Operation string          `json:"operation"`
+		UserRole  string          `json:"user_role,omitempty"`
 	}{}
 	jobPayload.Operation = "unknown"
+	startedAt := time.Now()
 	defer func() {
-		instrumentHeavyJob(jobPayload.Operation, jr.StartedAt, jr.Error)
+		instrumentHeavyJob(jobPayload.Operation, startedAt, jr.Error)
 		jr.Close()
 	}()
 	if err := json.Unmarshal(payload, &jobPayload); err != nil {
@@ -1679,7 +1714,10 @@ func (srv *Server) executeJobOp(jr *JobResult, payload []byte) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := context.WithValue(context.Background(), JOBIDKEY, jr.ID)
+	if jobPayload.UserRole != "" {
+		ctx = context.WithValue(ctx, userRoleContextKey, jobPayload.UserRole)
+	}
 	req := &mcp.CallToolRequest{}
 
 	switch jobPayload.Operation {

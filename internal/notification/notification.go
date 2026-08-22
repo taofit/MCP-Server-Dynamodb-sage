@@ -60,7 +60,7 @@ func NewNotificationService(kafkaClient KafkaClient, notificationsTopic string, 
 	}
 }
 
-func (ntf *NotificationService) SendNotification(tableName, status, operation, inputHash, message string) {
+func (ntf *NotificationService) SendNotificationViaKafka(tableName, status, operation, inputHash, message string) {
 	if ntf.kafkaClient == nil {
 		log.Printf("SendNotification: kafkaClient is nil, dropping: table=%s status=%s msg=%q", tableName, status, message)
 		return

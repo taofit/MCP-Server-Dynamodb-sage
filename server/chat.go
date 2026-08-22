@@ -40,7 +40,10 @@ func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().Unix()
-	srv.store.AddChatHistory("user", "", msg, now)
+	_, err := srv.store.addChatHistory("user", "", msg, now)
+	if err != nil {
+		log.Printf("Failed to add to chat history: %v", err)
+	}
 	role, ok := getUserRoleFromContext(r.Context())
 	if !ok {
 		role = roleGuest
@@ -75,7 +78,10 @@ func (srv *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 	resp := b.String()
 	now = time.Now().Unix()
-	srv.store.AddChatHistory("assistant", "", resp, now)
+	_, err = srv.store.addChatHistory("assistant", "", resp, now)
+	if err != nil {
+		log.Printf("Failed to add to chat history: %v", err)
+	}
 }
 
 func (srv *Server) streamChatReply(ctx context.Context, msg string, tokenChan chan string) error {
@@ -89,7 +95,7 @@ func (srv *Server) streamChatReply(ctx context.Context, msg string, tokenChan ch
 }
 
 func (srv *Server) buildChatHistory(msg string) []llm.Message {
-	storedChatHistory, err := srv.store.GetChatHistory(historyLimit)
+	storedChatHistory, err := srv.store.getChatHistory(historyLimit)
 	if err != nil {
 		log.Printf("Warning: Failed to get chat history, fallback to no history: %v", err)
 		return []llm.Message{
