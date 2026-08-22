@@ -35,22 +35,20 @@ import (
 var Version = "dev"
 
 type Server struct {
-	db                  *dynamodb.Client
-	s                   *mcp.Server
-	guardrail           *engine.Guardrail
-	auditLog            *audit.AuditLog
-	store               *Store
-	userID              string
-	userARN             string
-	transport           string
-	riskAnalyzer        *risk.RiskAnalyzer
-	sseHandler          *mcp.SSEHandler
-	queue               *queue.QueueManager
-	queueCancel         context.CancelFunc
-	queueCtx            context.Context
-	mcpCtx              context.Context
-	mcpCancel           context.CancelFunc
-	jobStorage          sync.Map
+	db           *dynamodb.Client
+	s            *mcp.Server
+	guardrail    *engine.Guardrail
+	auditLog     *audit.AuditLog
+	store        *Store
+	userID       string
+	userARN      string
+	transport    string
+	riskAnalyzer *risk.RiskAnalyzer
+	sseHandler   *mcp.SSEHandler
+	queue        *queue.QueueManager
+	mcpCtx       context.Context
+	mcpCancel    context.CancelFunc
+	// jobStorage removed — results stored in processed_ops_by_job table
 	kafkaClient         KafkaClient
 	heavyOpsTopic       string
 	notificationsTopic  string
@@ -65,6 +63,8 @@ type Server struct {
 	connCount           atomic.Int64
 	startTime           time.Time
 	rag                 *rag.RagPipeline
+	sweepDone           chan struct{}
+	sweepOnce           sync.Once
 }
 
 type ToolInfo struct {
@@ -100,7 +100,7 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 	}
 	guardrail := engine.NewGuardrail(config)
 	riskAnalyzer := risk.NewRiskAnalyzer(config, &risk.DynamoAdapter{Client: db}, guardrail)
-	auditLog, err := audit.NewAuditLog(store.GetDB())
+	auditLog, err := audit.NewAuditLog(store.getDB(), store.writeFunc())
 	if err != nil {
 		log.Fatalf("Failed to create audit log: %v", err)
 	}
@@ -121,6 +121,7 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 		metricsAddr:  metricsAddr,
 		startTime:    time.Now(),
 		rag:          rag,
+		sweepDone:    make(chan struct{}),
 	}
 
 	rps := 5.0
@@ -143,6 +144,7 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 	if srv.kafkaClient != nil {
 		srv.notificationService = notification.NewNotificationService(srv.kafkaClient, srv.notificationsTopic, srv)
 	}
+	srv.startSweepStaleClaims()
 	srv.mcpCtx, srv.mcpCancel = context.WithCancel(context.Background())
 	srv.sseHandler = mcp.NewSSEHandler(func(req *http.Request) *mcp.Server {
 		return srv.s
@@ -156,6 +158,22 @@ func New(db *dynamodb.Client, userID, userARN, configPath, kafkaConfigPath, dbPa
 	}
 
 	return srv
+}
+
+func (srv *Server) startSweepStaleClaims() {
+	srv.sweepStaleClaims()
+	go func() {
+		ticker := time.NewTicker(time.Minute * 1)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				srv.sweepStaleClaims()
+			case <-srv.sweepDone:
+				return
+			}
+		}
+	}()
 }
 
 func (srv *Server) HTTPHandler() http.Handler {
@@ -213,7 +231,7 @@ func (srv *Server) HTTPHandler() http.Handler {
 				return
 			}
 			if r.URL.Path == "/api/notifications" {
-				notifications, err := srv.store.GetNotifications()
+				notifications, err := srv.store.getNotifications()
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
@@ -299,6 +317,14 @@ func (srv *Server) HTTPHandler() http.Handler {
 			return
 		}
 		if r.URL.Path == "/api/chat" {
+			if r.Method == http.MethodDelete {
+				if _, err := srv.store.clearChatHistory(); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			srv.handleChat(w, r)
 			return
 		}
@@ -413,21 +439,13 @@ func (srv *Server) startWorkerPool() {
 	}
 	buffer := workerCount * 2
 	srv.queue = queue.New(workerCount, buffer)
-	srv.queueCtx, srv.queueCancel = context.WithCancel(context.Background())
-	go srv.queue.Start(srv.queueCtx)
-}
-
-func (srv *Server) shutdownWorkerPool(ctx context.Context) {
-	if srv.queueCancel != nil {
-		srv.queueCancel()
-	}
-	if srv.queue != nil {
-		srv.queue.Shutdown(ctx)
-	}
+	go srv.queue.Start()
 }
 
 func (srv *Server) Shutdown(ctx context.Context) error {
-	srv.shutdownWorkerPool(ctx)
+	if srv.queue != nil {
+		srv.queue.Shutdown(ctx)
+	}
 	if srv.mcpCancel != nil {
 		srv.mcpCancel()
 	}
@@ -437,6 +455,10 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 	if srv.store != nil {
 		srv.store.Close()
 	}
-
+	if srv.sweepDone != nil {
+		srv.sweepOnce.Do(func() {
+			close(srv.sweepDone)
+		})
+	}
 	return nil
 }

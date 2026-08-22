@@ -27,11 +27,4 @@ var (
 		Name:      "depth",
 		Help:      "Current depth of the in-process fallback queue",
 	})
-
-	JobStoragePending = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "sage",
-		Subsystem: "job_storage",
-		Name:      "pending",
-		Help:      "Number of pending JobResult entries not yet polled by client",
-	})
 )

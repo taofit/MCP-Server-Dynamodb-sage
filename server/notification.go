@@ -37,7 +37,7 @@ func (srv *Server) processNotification(key string, payload []byte) error {
 	srv.notificationService.SendMCPNotification(notf)
 	srv.notificationService.SendUINotify(notf.Severity, notf.Message)
 	srv.broadcastToSSE(notf)
-	srv.store.AddNotification(notf)
+	srv.store.addNotification(notf)
 	return nil
 }
 
@@ -67,5 +67,5 @@ func (srv *Server) recordNotification(table, operation, severity, message string
 		Timestamp: time.Now().Unix(),
 	}
 	srv.broadcastToSSE(notf)
-	srv.store.AddNotification(notf)
+	srv.store.addNotification(notf)
 }

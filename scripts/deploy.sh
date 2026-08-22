@@ -98,7 +98,9 @@ rm -rf "$DEPLOY_DIR"
 echo ""
 echo "=== Step 6: Upload & extract on Lightsail ==="
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new "$TARBALL" ubuntu@$IP:/tmp/$APP_NAME.tar.gz
-ssh -i "$SSH_KEY" ubuntu@$IP "sudo rm -rf /opt/$APP_NAME && sudo mkdir -p /opt/$APP_NAME && sudo tar -xzf /tmp/$APP_NAME.tar.gz -C /opt/$APP_NAME"
+# Preserve the SQLite data dir across deploys (audit history + processed_ops_by_job ledger)
+# — without this every redeploy would wipe audit.db along with /opt/$APP_NAME.
+ssh -i "$SSH_KEY" ubuntu@$IP "sudo bash -c 'cd /opt/$APP_NAME 2>/dev/null && tar -czf /tmp/${APP_NAME}-data.tgz data || true; rm -rf /opt/$APP_NAME && mkdir -p /opt/$APP_NAME && tar -xzf /tmp/$APP_NAME.tar.gz -C /opt/$APP_NAME; if [ -s /tmp/${APP_NAME}-data.tgz ]; then tar -xzf /tmp/${APP_NAME}-data.tgz -C /opt/$APP_NAME && rm -f /tmp/${APP_NAME}-data.tgz; fi'"
 
 echo ""
 echo "=== Step 7: Write production .env with IAM credentials ==="

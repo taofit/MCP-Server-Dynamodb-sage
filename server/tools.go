@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -18,19 +17,12 @@ import (
 )
 
 type JobResult struct {
-	ID        string              `json:"id"`
-	Result    *mcp.CallToolResult `json:"result,omitempty"`
-	Done      chan struct{}       `json:"done,omitempty"`
-	Error     error               `json:"error,omitempty"`
-	StartedAt time.Time           `json:"startedAt,omitempty"`
-	closeOnce sync.Once           `json:"-"`
+	ID    string              `json:"id"`
+	Result *mcp.CallToolResult `json:"result,omitempty"`
+	Error  error               `json:"error,omitempty"`
 }
 
-func (jr *JobResult) Close() {
-	if jr != nil && jr.Done != nil {
-		jr.closeOnce.Do(func() { close(jr.Done) })
-	}
-}
+func (jr *JobResult) Close() {}
 
 var readOnlyTools = map[string]bool{
 	"list_tables":       true,
@@ -441,17 +433,17 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 		}
 		if srv.isLargeOperation(req) {
 			id := uuid.New().String()
-			start := time.Now()
-			jobResult := &JobResult{ID: id, Done: make(chan struct{}), StartedAt: start}
-			srv.jobStorage.Store(id, jobResult)
-			metrics.JobStoragePending.Inc()
 
 			jobPayload := struct {
 				Input     In     `json:"input"`
 				Operation string `json:"operation"`
+				UserRole  string `json:"user_role,omitempty"`
 			}{
 				Input:     input,
 				Operation: req.Params.Name,
+			}
+			if role, ok := getUserRoleFromContext(ctx); ok {
+				jobPayload.UserRole = role
 			}
 			inputPayload, err := json.Marshal(jobPayload)
 			if err != nil {
@@ -468,7 +460,7 @@ func withRiskAnalysis[In, Out any](srv *Server, handler mcp.ToolHandlerFor[In, O
 				}
 			} else {
 				log.Printf("kafka producer is nil, using go's native queue: %s", id)
-				srv.queue.Submit(func(ctx context.Context) error {
+				srv.queue.Submit(func() error {
 					return srv.processHeavyOpForQueue(id, inputPayload)
 				})
 			}

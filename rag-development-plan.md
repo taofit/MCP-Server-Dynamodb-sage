@@ -52,7 +52,7 @@ The core insight: **RAG is not a separate application — it is a second categor
 
 ---
 
-## Phase 1: Foundation — Vector Database Integration
+## Phase 1: Foundation — Vector Database Integration ✅ Done
 
 ### 1.1 Add Qdrant to Docker Compose
 
@@ -174,7 +174,7 @@ rag:
 
 ---
 
-## Phase 2: Ingestion Pipeline
+## Phase 2: Ingestion Pipeline ✅ Done
 
 ### 2.1 Document Chunking
 
@@ -261,7 +261,7 @@ This allows an LLM agent to say: *"Index the entire `incident-reports` table so 
 
 ---
 
-## Phase 3: Retrieval Pipeline
+## Phase 3: Retrieval Pipeline ❌ Not done
 
 ### 3.1 Search MCP Tool (The Core Differentiator)
 
@@ -363,7 +363,7 @@ type DeleteDocumentArgs struct {
 
 ---
 
-## Phase 4: Data Synchronization (CDC)
+## Phase 4: Data Synchronization (CDC) ❌ Not done
 
 ### 4.1 The Problem
 
@@ -426,7 +426,7 @@ When an update event arrives:
 
 ---
 
-## Phase 5: Observability & Interview Talking Points
+## Phase 5: Observability & Interview Talking Points ❌ Not done
 
 ### 5.1 RAG-Specific Metrics (Prometheus)
 
@@ -477,18 +477,18 @@ When `advanced=true`, the LLM can override thresholds for edge cases like fuzzy 
 
 ## Phase 6: Implementation Order
 
-| Step | What | Why this order |
-|------|------|----------------|
-| 6.1 | Add Qdrant to docker-compose, add Go deps | Foundation — nothing works without this |
-| 6.2 | Define `embedding.Embedder` + `vector.VectorDB` interfaces | Contracts before implementations |
-| 6.3 | Implement OpenAI embedder + Qdrant client | Core primitives |
-| 6.4 | Implement chunker (fixed strategy first) | Fastest path to end-to-end |
-| 6.5 | Implement `ingest_document` MCP tool + Kafka consumer | First working RAG pipeline |
-| 6.6 | Implement `search_knowledge_base` tool | Second working pipeline |
-| 6.7 | Add score threshold + reranking | Polish retrieval quality |
-| 6.8 | Add CDC poller | Address staleness |
-| 6.9 | Add metrics + audit logging | Visibility |
-| 6.10 | Production hardening: config tuning, error handling | Reliability |
+| Step | What | Status | Why this order |
+|------|------|--------|----------------|
+| 6.1 | Add Qdrant to docker-compose, add Go deps | ✅ Done | Foundation — nothing works without this |
+| 6.2 | Define `embedding.Embedder` + `vector.VectorDB` interfaces | ✅ Done | Contracts before implementations |
+| 6.3 | Implement OpenAI embedder + Qdrant client | ✅ Done | Core primitives |
+| 6.4 | Implement chunker (fixed strategy first) | ✅ Done | Fastest path to end-to-end |
+| 6.5 | Implement `ingest_document` MCP tool + Kafka consumer | ✅ Done | First working RAG pipeline |
+| 6.6 | Implement `search_knowledge_base` tool | ❌ Not done | Second working pipeline |
+| 6.7 | Add score threshold + reranking | ❌ Not done | Polish retrieval quality |
+| 6.8 | Add CDC poller | ❌ Not done | Address staleness |
+| 6.9 | Add metrics + audit logging | ❌ Not done | Visibility |
+| 6.10 | Production hardening: config tuning, error handling | ❌ Not done | Reliability |
 
 ### Go Dependencies to Add
 

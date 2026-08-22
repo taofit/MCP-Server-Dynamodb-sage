@@ -3,7 +3,6 @@ package server
 import (
 	"dynamodb-sage/internal/audit"
 	"dynamodb-sage/internal/kafka"
-	"dynamodb-sage/internal/metrics"
 	"dynamodb-sage/internal/notification"
 	"encoding/json"
 	"fmt"
@@ -45,10 +44,7 @@ func (srv *Server) initKafkaClient(kafkaConfigPath string) error {
 	srv.kafkaClient.RegisterHandler(srv.heavyOpsTopic, srv.processHeavyOp)
 	srv.kafkaClient.RegisterHandler(srv.notificationsTopic, srv.processNotification)
 	srv.kafkaClient.RegisterHandler(kafkaConfig.DLQ.Topic, srv.processDLQ)
-	srv.kafkaClient.SetOnComplete(func(key string) {
-		srv.jobStorage.Delete(key)
-		metrics.JobStoragePending.Dec()
-	})
+	srv.kafkaClient.SetOnComplete(func(key string) {}) // no-op: results stored in SQLite
 	go func() {
 		if err := srv.kafkaClient.Start(); err != nil {
 			log.Printf("Failed to start kafka client: %v", err)
@@ -57,19 +53,20 @@ func (srv *Server) initKafkaClient(kafkaConfigPath string) error {
 	return nil
 }
 
+
 func (srv *Server) processDLQ(key string, payload []byte) error {
 	log.Printf("Dead Letter Queue message for key %s: %s", key, string(payload))
 	tableName, operation, retryCount, jobID := srv.parseDLQPayload(payload)
 	notificationData := getDLQNotificationPayload(key, tableName, operation, retryCount, jobID)
 	srv.processNotification(key, notificationData)
-	srv.auditTrail(tableName, operation, payload, key)
+	srv.auditTrail(tableName, operation, payload, key, jobID)
 	return nil
 }
 
 func (srv *Server) parseDLQPayload(payload []byte) (tableName string, operation string, retryCount int, jobID string) {
 	tableName = "unknown"
 	operation = "unknown"
-	jobID = "unknown"
+	jobID = ""
 	retryCount = 0
 	var dlqPayload kafka.DLQPayload
 	var jobPayload notification.JobPayload
@@ -97,16 +94,31 @@ func (srv *Server) parseDLQPayload(payload []byte) (tableName string, operation 
 	return
 }
 
-func (srv *Server) auditTrail(tableName, operation string, payload []byte, key string) {
+func (srv *Server) sweepStaleClaims() {
+	n, err := srv.store.deleteStaleClaimedOps(time.Minute * 10)
+	if err != nil {
+		log.Printf("Failed to delete stale claimed ops: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("Deleted %d stale claimed ops", n)
+	}
+}
+
+func (srv *Server) auditTrail(tableName, operation string, payload []byte, key string, jobID string) {
+	if jobID == "" {
+		jobID = key
+	}
 	srv.auditLog.LogActivity(audit.AuditEntry{
 		Timestamp:             time.Now(),
 		Operation:             operation,
 		TableName:             tableName,
-		User:                  "system",
+		User:                  srv.userID,
 		CapacityUnitsConsumed: 0,
 		CapacityType:          "dlq",
 		Status:                "error",
 		Message:               fmt.Sprintf("DLQ message for key %s: %s", key, string(payload)),
+		JobID:                 jobID,
 	})
 }
 

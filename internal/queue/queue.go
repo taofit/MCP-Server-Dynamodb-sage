@@ -4,18 +4,18 @@ package queue
 import (
 	"context"
 	"dynamodb-sage/internal/metrics"
+	"log"
 	"sync"
 	"time"
 )
 
-type Job func(ctx context.Context) error
+type Job func() error
 
 type QueueManager struct {
 	workerCount int
 	buffer      int
 	jobs        chan Job
 	sync.WaitGroup
-	runCancel context.CancelFunc
 }
 
 func New(workerCount, buffer int) *QueueManager {
@@ -33,9 +33,6 @@ func (m *QueueManager) Enqueue(job Job) error {
 }
 
 func (m *QueueManager) Shutdown(ctx context.Context) {
-	if m.runCancel != nil {
-		m.runCancel()
-	}
 	done := make(chan struct{})
 	go func() {
 		close(m.jobs)
@@ -51,17 +48,16 @@ func (m *QueueManager) Shutdown(ctx context.Context) {
 	}
 }
 
-func (m *QueueManager) Start(ctx context.Context) {
-	runCtx, runCancel := context.WithCancel(ctx)
-	m.runCancel = runCancel
-
+func (m *QueueManager) Start() {
 	for i := 0; i < m.workerCount; i++ {
 		m.Add(1)
 		go func() {
 			defer m.Done()
 			for job := range m.jobs {
 				metrics.QueueDepth.Dec()
-				job(runCtx)
+				if err := job(); err != nil {
+					log.Printf("queue: background job failed: %v", err)
+				}
 			}
 		}()
 	}
